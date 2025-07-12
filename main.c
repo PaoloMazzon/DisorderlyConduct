@@ -27,26 +27,34 @@ Oct_Allocator gAllocator;
 Oct_Texture gBackBuffer;
 
 ///////////////////////// CONSTANTS /////////////////////////
-// Backbuffer and room size
-const float GAME_WIDTH = 320;
-const float GAME_HEIGHT = 176;
 
 // Default level layout
 const int32_t LEVEL_LAYOUT[] = {
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
 };
-const int32_t LEVEL_WIDTH = 20;
-const int32_t LEVEL_HEIGHT = 11;
+const int32_t LEVEL_WIDTH = 32;
+const int32_t LEVEL_HEIGHT = 18;
+
+// Backbuffer and room size
+const float GAME_WIDTH = LEVEL_WIDTH * 16;
+const float GAME_HEIGHT = LEVEL_HEIGHT * 16;
 
 // These should line up with character types
 const float CHARACTER_TYPE_LIFESPANS[] = {
@@ -76,10 +84,12 @@ const Oct_Vec2 CHARACTER_HP_RANGES[] = {
 const float GROUND_FRICTION = 0.05;
 const float AIR_FRICTION = 0.01;
 const float GRAVITY = 0.5;
+const float BOUNCE_PRESERVED_BOUNCE_WALL = 0.50; // how much velocity is preserved when rebounding off walls
 const float BOUNCE_PRESERVED = 0.20; // how much velocity is preserved when rebounding off walls
 const float GAMEPAD_DEADZONE = 0.25;
 const float PLAYER_ACCELERATION = 0.5;
-const float PLAYER_JUMP_SPEED = 5;
+const float PLAYER_JUMP_SPEED = 7;
+const float SPEED_LIMIT = 12;
 
 ///////////////////////// STRUCTS /////////////////////////
 typedef struct PhysicsObject_t {
@@ -150,24 +160,31 @@ static inline float sign(float x) {
 }
 
 // checks for collisions against the tilemap
-bool collision_at(float x, float y, float width, float height) {
+int32_t collision_at(float x, float y, float width, float height) {
     int32_t grid_x1 = floorf(x / oct_TilemapCellWidth(state.level_map));
     int32_t grid_y1 = floorf(y / oct_TilemapCellHeight(state.level_map));
     int32_t grid_x2 = floorf((x + width) / oct_TilemapCellWidth(state.level_map));
     int32_t grid_y2 = floorf((y + height) / oct_TilemapCellHeight(state.level_map));
 
-    const bool coll = oct_GetTilemap(state.level_map, grid_x1, grid_y1) != 0 ||
-                      oct_GetTilemap(state.level_map, grid_x2, grid_y1) != 0 ||
-                      oct_GetTilemap(state.level_map, grid_x1, grid_y2) != 0 ||
-                      oct_GetTilemap(state.level_map, grid_x2, grid_y2) != 0;
-
-    return coll;
+    int32_t wall1 = oct_GetTilemap(state.level_map, grid_x1, grid_y1);
+    if (wall1)
+        return wall1;
+    int32_t wall2 = oct_GetTilemap(state.level_map, grid_x2, grid_y1);
+    if (wall2)
+        return wall2;
+    int32_t wall3 = oct_GetTilemap(state.level_map, grid_x1, grid_y2);
+    if (wall3)
+        return wall3;
+    int32_t wall4 = oct_GetTilemap(state.level_map, grid_x2, grid_y2);
+    if (wall4)
+        return wall4;
+    return 0;
 }
 
 void process_physics(PhysicsObject *physx, float x_acceleration, float y_acceleration) {
     // Add acceleration to velocity
-    physx->x_vel += x_acceleration;
-    physx->y_vel += y_acceleration;
+    physx->x_vel = oct_Clamp(-SPEED_LIMIT, SPEED_LIMIT, physx->x_vel + x_acceleration);
+    physx->y_vel = oct_Clamp(-SPEED_LIMIT, SPEED_LIMIT, physx->y_vel + y_acceleration);
 
     const bool kinda_touching_ground = collision_at(physx->x, physx->y + 1, physx->bb_width, physx->bb_height);
 
@@ -182,22 +199,31 @@ void process_physics(PhysicsObject *physx, float x_acceleration, float y_acceler
     // TODO: Collisions with other entities
 
     // Bouncy dogshit collisions
-    if (collision_at(physx->x + physx->x_vel, physx->y, physx->bb_width, physx->bb_height)) {
+    int32_t wall = collision_at(physx->x + physx->x_vel, physx->y, physx->bb_width, physx->bb_height);
+    if (wall) {
         // Get close to the wall
         while (!collision_at(physx->x + (sign(physx->x_vel) * 0.1), physx->y, physx->bb_width, physx->bb_height))
             physx->x += (sign(physx->x_vel) * 0.1);
 
         // Bounce off the wall slightly
-        physx->x_vel = physx->x_vel * (-BOUNCE_PRESERVED);
+        if (wall == 2)
+            physx->x_vel = physx->x_vel * (-BOUNCE_PRESERVED_BOUNCE_WALL);
+        else
+            physx->x_vel = physx->x_vel * (-BOUNCE_PRESERVED);
     }
     physx->x += physx->x_vel;
-    if (collision_at(physx->x, physx->y + physx->y_vel, physx->bb_width, physx->bb_height)) {
+
+    wall = collision_at(physx->x, physx->y + physx->y_vel, physx->bb_width, physx->bb_height);
+    if (wall) {
         // Get close to the wall
         while (!collision_at(physx->x, physx->y + (sign(physx->y_vel) * 0.1), physx->bb_width, physx->bb_height))
             physx->y += (sign(physx->y_vel) * 0.1);
 
         // Bounce off the wall slightly
-        physx->y_vel = physx->y_vel * (-BOUNCE_PRESERVED);
+        if (wall == 2)
+            physx->y_vel = physx->y_vel * (-BOUNCE_PRESERVED_BOUNCE_WALL);
+        else
+            physx->y_vel = physx->y_vel * (-BOUNCE_PRESERVED);
     }
     physx->y += physx->y_vel;
 }
@@ -358,7 +384,10 @@ void *startup() {
     gBackBuffer = oct_CreateSurface((Oct_Vec2){GAME_WIDTH, GAME_HEIGHT});
 
     menu_begin();
+
+    // oct shit
     oct_GamepadSetAxisDeadzone(GAMEPAD_DEADZONE);
+    oct_SetFullscreen(true);
 
     return null;
 }

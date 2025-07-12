@@ -1,0 +1,31 @@
+{
+  "exclude":
+  [
+
+  ],
+  "fonts":
+  [
+    {
+      "name": "ttf_kingdom",
+      "files": ["fonts/Kingdom.ttf"]
+    }
+  ],
+  "bitmap fonts":
+  [
+    {
+      "name": "fnt_monogram",
+      "image": "fonts/monogram.png",
+      "cell size": [6, 12],
+      "unicode range": [32, 128]
+    }
+  ],
+  "font atlases":
+  [
+    {
+      "name": "fnt_kingdom",
+      "font": "ttf_kingdom",
+      "size": 20,
+      "unicode ranges": [[32, 128]]
+    }
+  ]
+}

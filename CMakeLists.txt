@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.31)
-project(jamgame C)
+project(jamgame)
 
 set(CMAKE_C_STANDARD 23)
+set(CMAKE_CXX_STANDARD 17)
 
 # Compile the engine to link later
 add_subdirectory(Octarine/OctarineEngine)

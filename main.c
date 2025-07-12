@@ -21,6 +21,14 @@ typedef enum {
     GAME_STATUS_QUIT, // alt + f4
 } GameStatus;
 
+typedef enum {
+    COLLISION_EVENT_TYPE_NO_COLLISION = 0,
+    COLLISION_EVENT_TYPE_WALL = 1,
+    COLLISION_EVENT_TYPE_BOUNCY_WALL = 2,
+    COLLISION_EVENT_TYPE_CHARACTER = 3,
+    COLLISION_EVENT_TYPE_PROJECTILE = 4,
+} CollisionEventType;
+
 ///////////////////////// GLOBALS /////////////////////////
 Oct_AssetBundle gBundle;
 Oct_Allocator gAllocator;
@@ -81,6 +89,7 @@ const Oct_Vec2 CHARACTER_HP_RANGES[] = {
 #define MAX_CHARACTERS 100
 #define MAX_PROJECTILES 100
 #define MAX_PARTICLES 100
+#define MAX_PHYSICS_OBJECTS (MAX_CHARACTERS + MAX_PROJECTILES) // particles noclip
 const float GROUND_FRICTION = 0.05;
 const float AIR_FRICTION = 0.01;
 const float GRAVITY = 0.5;
@@ -103,6 +112,20 @@ typedef struct PhysicsObject_t {
     float bb_width;
     float bb_height;
 } PhysicsObject;
+
+/* TODO: This if comparing all entities turns out to suck
+typedef struct SpacePartition_t {
+    PhysicsObject *objects[MAX_PHYSICS_OBJECTS];
+    int32_t len; // how many physics objects here
+} SpacePartition;
+
+typedef struct GlobalSpacePartition_t {
+    SpacePartition *partitions;
+    int32_t width;
+    int32_t height;
+    float partition_width;
+    float partition_height;
+} GlobalSpacePartition_t;*/
 
 typedef struct Character_t {
     CharacterType type; // Type of opp
@@ -144,6 +167,16 @@ typedef struct InputProfile_t {
     bool action;
 } InputProfile;
 
+// Types of things you can collide with
+typedef struct CollisionEvent_t {
+    CollisionEventType type;
+    union {
+        int32_t wallIndex;
+        Character *character;
+        Projectile *projectile;
+    };
+} CollisionEvent;
+
 // LEAVE THIS AT THE BOTTOM
 typedef struct GameState_t {
     Oct_Tilemap level_map;
@@ -159,34 +192,59 @@ static inline float sign(float x) {
     return x > 0 ? 1 : (x < 0 ? -1 : 0);
 }
 
+static inline bool aabb(float x1, float y1, float w1, float h1, float x2, float y2, float w2, float h2) {
+    return x1 < x2 + w2 && x1 + w1 > x2 && y1 < y2 + h2 && y1 + h1 > y2;
+}
+
 // checks for collisions against the tilemap
-int32_t collision_at(float x, float y, float width, float height) {
+// returns < 0 means this is a collision with a projectile
+CollisionEvent collision_at(Character *this_c, Projectile *this_p, float x, float y, float width, float height) {
+    CollisionEvent e = {.type = COLLISION_EVENT_TYPE_NO_COLLISION};
     int32_t grid_x1 = floorf(x / oct_TilemapCellWidth(state.level_map));
     int32_t grid_y1 = floorf(y / oct_TilemapCellHeight(state.level_map));
     int32_t grid_x2 = floorf((x + width) / oct_TilemapCellWidth(state.level_map));
     int32_t grid_y2 = floorf((y + height) / oct_TilemapCellHeight(state.level_map));
 
-    int32_t wall1 = oct_GetTilemap(state.level_map, grid_x1, grid_y1);
-    if (wall1)
-        return wall1;
-    int32_t wall2 = oct_GetTilemap(state.level_map, grid_x2, grid_y1);
-    if (wall2)
-        return wall2;
-    int32_t wall3 = oct_GetTilemap(state.level_map, grid_x1, grid_y2);
-    if (wall3)
-        return wall3;
-    int32_t wall4 = oct_GetTilemap(state.level_map, grid_x2, grid_y2);
-    if (wall4)
-        return wall4;
-    return 0;
+    int32_t wall[4] = {oct_GetTilemap(state.level_map, grid_x1, grid_y1),
+                       oct_GetTilemap(state.level_map, grid_x2, grid_y1),
+                       oct_GetTilemap(state.level_map, grid_x1, grid_y2),
+                       oct_GetTilemap(state.level_map, grid_x2, grid_y2)};
+    for (int i = 0; i < 4; i++) {
+        if (wall[i]) {
+            e.type = wall[i] == 2 ? COLLISION_EVENT_TYPE_BOUNCY_WALL : COLLISION_EVENT_TYPE_WALL;
+            e.wallIndex = wall[i];
+            return e;
+        }
+    }
+
+    // If no wall collision we will check against all possible physics objects
+    // TODO: THIS MIGHT BE A PERFORMANCE PROBLEM LMAO
+    for (int i = 0; i < MAX_CHARACTERS; i++) {
+        if (&state.characters[i] == this_c || !state.characters[i].alive) continue;
+        if (aabb(x, y, width, height, state.characters[i].physx.x, state.characters[i].physx.y, state.characters[i].physx.bb_width, state.characters[i].physx.bb_height)) {
+            e.type = COLLISION_EVENT_TYPE_CHARACTER;
+            e.character = &state.characters[i];
+            return e;
+        }
+    }
+    for (int i = 0; i < MAX_PROJECTILES; i++) {
+        if (&state.projectiles[i] == this_p || !state.projectiles[i].alive) continue;
+        if (aabb(x, y, width, height, state.projectiles[i].physx.x, state.projectiles[i].physx.y, state.projectiles[i].physx.bb_width, state.projectiles[i].physx.bb_height)) {
+            e.type = COLLISION_EVENT_TYPE_PROJECTILE;
+            e.projectile = &state.projectiles[i];
+            return e;
+        }
+    }
+
+    return e;
 }
 
-void process_physics(PhysicsObject *physx, float x_acceleration, float y_acceleration) {
+void process_physics(Character *this_c, Projectile *this_p, PhysicsObject *physx, float x_acceleration, float y_acceleration) {
     // Add acceleration to velocity
     physx->x_vel = oct_Clamp(-SPEED_LIMIT, SPEED_LIMIT, physx->x_vel + x_acceleration);
     physx->y_vel = oct_Clamp(-SPEED_LIMIT, SPEED_LIMIT, physx->y_vel + y_acceleration);
 
-    const bool kinda_touching_ground = collision_at(physx->x, physx->y + 1, physx->bb_width, physx->bb_height);
+    const bool kinda_touching_ground = collision_at(this_c, this_p, physx->x, physx->y + 1, physx->bb_width, physx->bb_height).type != 0;
 
     // Friction and gravity
     if (kinda_touching_ground) {
@@ -196,31 +254,31 @@ void process_physics(PhysicsObject *physx, float x_acceleration, float y_acceler
     }
     physx->y_vel += GRAVITY;
 
-    // TODO: Collisions with other entities
+    if (physx->noclip) return;
 
     // Bouncy dogshit collisions
-    int32_t wall = collision_at(physx->x + physx->x_vel, physx->y, physx->bb_width, physx->bb_height);
-    if (wall) {
+    CollisionEvent ce = collision_at(this_c, this_p, physx->x + physx->x_vel, physx->y, physx->bb_width, physx->bb_height);
+    if (ce.type) {
         // Get close to the wall
-        while (!collision_at(physx->x + (sign(physx->x_vel) * 0.1), physx->y, physx->bb_width, physx->bb_height))
+        while (!collision_at(this_c, this_p, physx->x + (sign(physx->x_vel) * 0.1), physx->y, physx->bb_width, physx->bb_height).type)
             physx->x += (sign(physx->x_vel) * 0.1);
 
         // Bounce off the wall slightly
-        if (wall == 2)
+        if (ce.type == COLLISION_EVENT_TYPE_BOUNCY_WALL)
             physx->x_vel = physx->x_vel * (-BOUNCE_PRESERVED_BOUNCE_WALL);
         else
             physx->x_vel = physx->x_vel * (-BOUNCE_PRESERVED);
     }
     physx->x += physx->x_vel;
 
-    wall = collision_at(physx->x, physx->y + physx->y_vel, physx->bb_width, physx->bb_height);
-    if (wall) {
+    ce = collision_at(this_c, this_p, physx->x, physx->y + physx->y_vel, physx->bb_width, physx->bb_height);
+    if (ce.type) {
         // Get close to the wall
-        while (!collision_at(physx->x, physx->y + (sign(physx->y_vel) * 0.1), physx->bb_width, physx->bb_height))
+        while (!collision_at(this_c, this_p, physx->x, physx->y + (sign(physx->y_vel) * 0.1), physx->bb_width, physx->bb_height).type)
             physx->y += (sign(physx->y_vel) * 0.1);
 
         // Bounce off the wall slightly
-        if (wall == 2)
+        if (ce.type == COLLISION_EVENT_TYPE_BOUNCY_WALL)
             physx->y_vel = physx->y_vel * (-BOUNCE_PRESERVED_BOUNCE_WALL);
         else
             physx->y_vel = physx->y_vel * (-BOUNCE_PRESERVED);
@@ -248,17 +306,11 @@ InputProfile process_player(Character *character) {
                oct_GamepadLeftAxisX(0) > 0) {
         input.x_acc = PLAYER_ACCELERATION;
     }
-    const bool kinda_touching_ground = collision_at(character->physx.x, character->physx.y + 1, character->physx.bb_width, character->physx.bb_height);
+    const bool kinda_touching_ground = collision_at(character, null, character->physx.x, character->physx.y + 1, character->physx.bb_width, character->physx.bb_height).type;
 
     if (kinda_touching_ground && (oct_KeyPressed(OCT_KEY_SPACE) || oct_KeyPressed(OCT_KEY_UP) || oct_GamepadButtonPressed(0, OCT_GAMEPAD_BUTTON_A))) {
         input.y_acc = -PLAYER_JUMP_SPEED;
     }
-
-    oct_DrawText(
-            oct_GetAsset(gBundle, "fnt_monogram"),
-            (Oct_Vec2){0, 0},
-            1,
-            "Position: (%.2f,%.2f)\nVelocity: (%.2f,%.2f)", character->physx.x, character->physx.y, character->physx.x_vel, character->physx.y_vel);
 
     return input;
 }
@@ -272,7 +324,7 @@ void process_character(Character *character) {
         // Get input from ai
     }
 
-    process_physics(&character->physx, input.x_acc, input.y_acc);
+    process_physics(character, null, &character->physx, input.x_acc, input.y_acc);
     draw_character(character);
 }
 
@@ -456,7 +508,7 @@ int main(int argc, const char **argv) {
             .windowTitle = "Jam Game",
             .windowWidth = 1280,
             .windowHeight = 720,
-            .debug = false,
+            .debug = true,
     };
     oct_Init(&initInfo);
     return 0;

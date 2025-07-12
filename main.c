@@ -70,13 +70,16 @@ const Oct_Vec2 CHARACTER_HP_RANGES[] = {
         {90, 100}, // CHARACTER_TYPE_LASER,
 };
 
-const int32_t MAX_CHARACTERS = 100;
-const int32_t MAX_PROJECTILES = 100;
-const int32_t MAX_PARTICLES = 100;
+#define MAX_CHARACTERS 100
+#define MAX_PROJECTILES 100
+#define MAX_PARTICLES 100
 const float GROUND_FRICTION = 0.05;
 const float AIR_FRICTION = 0.01;
 const float GRAVITY = 0.5;
 const float BOUNCE_PRESERVED = 0.20; // how much velocity is preserved when rebounding off walls
+const float GAMEPAD_DEADZONE = 0.25;
+const float PLAYER_ACCELERATION = 0.5;
+const float PLAYER_JUMP_SPEED = 5;
 
 ///////////////////////// STRUCTS /////////////////////////
 typedef struct PhysicsObject_t {
@@ -93,6 +96,7 @@ typedef struct PhysicsObject_t {
 
 typedef struct Character_t {
     CharacterType type; // Type of opp
+    uint64_t id;
     Oct_SpriteInstance sprite;
     bool player_controlled; // True if this is the current player false means AI
     PhysicsObject physx;
@@ -123,6 +127,14 @@ typedef struct Projectile_t {
     _Atomic bool alive;
 } Projectile;
 
+// Represents unified player and ai input
+typedef struct InputProfile_t {
+    float x_acc;
+    float y_acc;
+    bool action;
+} InputProfile;
+
+// LEAVE THIS AT THE BOTTOM
 typedef struct GameState_t {
     Oct_Tilemap level_map;
     Character characters[MAX_CHARACTERS];
@@ -144,10 +156,12 @@ bool collision_at(float x, float y, float width, float height) {
     int32_t grid_x2 = floorf((x + width) / oct_TilemapCellWidth(state.level_map));
     int32_t grid_y2 = floorf((y + height) / oct_TilemapCellHeight(state.level_map));
 
-    return oct_GetTilemap(state.level_map, grid_x1, grid_y1) != 0 ||
-           oct_GetTilemap(state.level_map, grid_x2, grid_y1) != 0 ||
-           oct_GetTilemap(state.level_map, grid_x1, grid_y2) != 0 ||
-           oct_GetTilemap(state.level_map, grid_x2, grid_y2) != 0;
+    const bool coll = oct_GetTilemap(state.level_map, grid_x1, grid_y1) != 0 ||
+                      oct_GetTilemap(state.level_map, grid_x2, grid_y1) != 0 ||
+                      oct_GetTilemap(state.level_map, grid_x1, grid_y2) != 0 ||
+                      oct_GetTilemap(state.level_map, grid_x2, grid_y2) != 0;
+
+    return coll;
 }
 
 void process_physics(PhysicsObject *physx, float x_acceleration, float y_acceleration) {
@@ -159,11 +173,11 @@ void process_physics(PhysicsObject *physx, float x_acceleration, float y_acceler
 
     // Friction and gravity
     if (kinda_touching_ground) {
-        physx->x_vel *= GROUND_FRICTION;
+        physx->x_vel *= (1 - GROUND_FRICTION);
     } else {
-        physx->x_vel *= AIR_FRICTION;
+        physx->x_vel *= (1 - AIR_FRICTION);
     }
-    physx->y_vel + GRAVITY;
+    physx->y_vel += GRAVITY;
 
     // TODO: Collisions with other entities
 
@@ -180,7 +194,7 @@ void process_physics(PhysicsObject *physx, float x_acceleration, float y_acceler
     if (collision_at(physx->x, physx->y + physx->y_vel, physx->bb_width, physx->bb_height)) {
         // Get close to the wall
         while (!collision_at(physx->x, physx->y + (sign(physx->y_vel) * 0.1), physx->bb_width, physx->bb_height))
-            physx->x += (sign(physx->y_vel) * 0.1);
+            physx->y += (sign(physx->y_vel) * 0.1);
 
         // Bounce off the wall slightly
         physx->y_vel = physx->y_vel * (-BOUNCE_PRESERVED);
@@ -190,7 +204,8 @@ void process_physics(PhysicsObject *physx, float x_acceleration, float y_acceler
 
 void draw_character(Character *character) {
     if (character->type == CHARACTER_TYPE_JUMPER) {
-        oct_DrawSprite(
+        oct_DrawSpriteInt(
+                OCT_INTERPOLATE_ALL, character->id,
                 oct_GetAsset(gBundle, "sprites/jumper.json"),
                 &character->sprite,
                 (Oct_Vec2) {character->physx.x, character->physx.y}
@@ -198,17 +213,41 @@ void draw_character(Character *character) {
     } // TODO: The rest of these
 }
 
-void process_player(Character *character) {
+InputProfile process_player(Character *character) {
+    InputProfile input = {0};
+    if (oct_KeyDown(OCT_KEY_LEFT) || oct_GamepadButtonDown(0, OCT_GAMEPAD_BUTTON_DPAD_LEFT) ||
+        oct_GamepadLeftAxisX(0) < 0) {
+        input.x_acc = -PLAYER_ACCELERATION;
+    } else if (oct_KeyDown(OCT_KEY_RIGHT) || oct_GamepadButtonDown(0, OCT_GAMEPAD_BUTTON_DPAD_RIGHT) ||
+               oct_GamepadLeftAxisX(0) > 0) {
+        input.x_acc = PLAYER_ACCELERATION;
+    }
+    const bool kinda_touching_ground = collision_at(character->physx.x, character->physx.y + 1, character->physx.bb_width, character->physx.bb_height);
 
+    if (kinda_touching_ground && (oct_KeyPressed(OCT_KEY_SPACE) || oct_KeyPressed(OCT_KEY_UP) || oct_GamepadButtonPressed(0, OCT_GAMEPAD_BUTTON_A))) {
+        input.y_acc = -PLAYER_JUMP_SPEED;
+    }
+
+    oct_DrawText(
+            oct_GetAsset(gBundle, "fnt_monogram"),
+            (Oct_Vec2){0, 0},
+            1,
+            "Position: (%.2f,%.2f)\nVelocity: (%.2f,%.2f)", character->physx.x, character->physx.y, character->physx.x_vel, character->physx.y_vel);
+
+    return input;
 }
 
 void process_character(Character *character) {
-    // This is only to handle physics/acceleration
+    // This is only to handle input
+    InputProfile input = {0};
     if (character->player_controlled) {
-        process_player(character);
-        return;
+        input = process_player(character);
+    } else {
+        // Get input from ai
     }
-    // todo: this
+
+    process_physics(&character->physx, input.x_acc, input.y_acc);
+    draw_character(character);
 }
 
 void process_particle(Particle *particle) {
@@ -229,9 +268,12 @@ Character *add_character(Character *character) {
             memcpy(slot, character, sizeof(struct Character_t));
             slot->alive = true;
 
-            // Handle sprite instance
+            // Handle sprite instance & bounding box
             if (slot->type == CHARACTER_TYPE_JUMPER) {
                 oct_InitSpriteInstance(&slot->sprite, oct_GetAsset(gBundle, "sprites/jumper.json"), true);
+                slot->physx.bb_width = 12;
+                slot->physx.bb_height = 12;
+                slot->id = 10000 + i;
             }  // TODO: The rest of these
 
             break;
@@ -261,10 +303,8 @@ void game_begin() {
         .lifespan = 9999,
         .player_controlled = true,
         .physx = {
-                .x = 20,
+                .x = 200,
                 .y = 20,
-                .bb_width = 8,
-                .bb_height = 8
         }
     });
 }
@@ -272,6 +312,21 @@ void game_begin() {
 GameStatus game_update() {
 
     oct_TilemapDraw(state.level_map);
+
+    for (int i = 0; i < MAX_CHARACTERS; i++) {
+        if (!state.characters[i].alive) continue;
+        process_character(&state.characters[i]);
+    }
+
+    // TODO: Put this shit in a job cuz idgaf about race conditions
+    for (int i = 0; i < MAX_PROJECTILES; i++) {
+        if (!state.projectiles[i].alive) continue;
+        process_projectile(&state.projectiles[i]);
+    }
+    for (int i = 0; i < MAX_PARTICLES; i++) {
+        if (!state.particles[i].alive) continue;
+        process_particle(&state.particles[i]);
+    }
 
     return GAME_STATUS_PLAY_GAME;
 }
@@ -303,6 +358,7 @@ void *startup() {
     gBackBuffer = oct_CreateSurface((Oct_Vec2){GAME_WIDTH, GAME_HEIGHT});
 
     menu_begin();
+    oct_GamepadSetAxisDeadzone(GAMEPAD_DEADZONE);
 
     return null;
 }
@@ -371,7 +427,7 @@ int main(int argc, const char **argv) {
             .windowTitle = "Jam Game",
             .windowWidth = 1280,
             .windowHeight = 720,
-            .debug = true,
+            .debug = false,
     };
     oct_Init(&initInfo);
     return 0;

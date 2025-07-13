@@ -3,6 +3,7 @@
 #include <memory.h>
 #include <math.h>
 #include <oct/cJSON.h>
+#include <string.h>
 
 ///////////////////////// ENUMS /////////////////////////
 typedef enum {
@@ -140,8 +141,17 @@ const float Y_SHOOTER_BULLET_SPEED = 12;
 const float XY_SHOOTER_BULLET_LIFETIME = 2;
 const float XY_SHOOTER_BULLET_SPEED = 12;
 const float XY_SHOOTER_RECOIL = 4;
+const char *SAVE_NAME = "save.json";
 
 ///////////////////////// STRUCTS /////////////////////////
+typedef struct Save_t {
+    float highscore;
+
+    // probably later idk
+    int32_t server_ipv4;
+    int32_t port;
+} Save;
+
 typedef struct PhysicsObject_t {
     float x;
     float y;
@@ -1206,10 +1216,10 @@ GameStatus game_update() {
     } else {
         // Draw total time
         Oct_Vec2 size;
-        oct_GetTextSize(kingdom, size, 1, "Score: %i", (int)state.total_time);
+        oct_GetTextSize(kingdom, size, 1, "Score: %i", (int)state.score);
         oct_DrawTextColour(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (size[0] / 2) + 1, 22}, &(Oct_Colour) {0, 0, 0, 1},
-                           1, "Score: %i", (int)state.total_time);
-        oct_DrawText(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (size[0] / 2), 21}, 1, "Score: %i", (int)state.total_time);
+                           1, "Score: %i", (int)state.score);
+        oct_DrawText(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (size[0] / 2), 21}, 1, "Score: %i", (int)state.score);
     }
 
     state.total_time += 1.0 / 30.0;
@@ -1250,6 +1260,42 @@ void menu_end() {
 }
 
 ///////////////////////// MAIN /////////////////////////
+
+Save parse_save() {
+    // Open json with save
+    uint32_t size;
+    uint8_t *data = oct_ReadFile(SAVE_NAME, gAllocator, &size);
+
+    if (data) {
+        cJSON *json = cJSON_ParseWithLength((void *) data, size);
+        if (json) {
+            // todo parse ip and port in future for remote highscore db
+            float score = cJSON_GetNumberValue(cJSON_GetObjectItem(json, "highscore"));
+            if (!cJSON_IsNumber(cJSON_GetObjectItem(json, "highscore")))
+                score = 0;
+            Save save = {
+                    .highscore = score
+            };
+            cJSON_Delete(json);
+            oct_Free(gAllocator, data);
+            return save;
+
+        } else {
+            oct_Free(gAllocator, data);
+            oct_Raise(OCT_STATUS_ERROR, false, "save file is cooked");
+        }
+    }
+    return (Save){0};
+}
+
+void save(Save *save) {
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddNumberToObject(json, "highscore", save->highscore);
+    // todo add ip shit eventually
+    char * s = cJSON_Print(json);
+    oct_WriteFile(SAVE_NAME, s, strlen(s));
+    cJSON_Delete(json);
+}
 
 void *startup() {
     gBundle = oct_LoadAssetBundle("data");
@@ -1335,7 +1381,7 @@ int main(int argc, const char **argv) {
             .windowTitle = "Jam Game",
             .windowWidth = 1280,
             .windowHeight = 720,
-            .debug = false,
+            .debug = true,
     };
     oct_Init(&initInfo);
     return 0;

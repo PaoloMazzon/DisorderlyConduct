@@ -48,7 +48,7 @@ const int32_t LEVEL_HEIGHT = 18;
 const float GAME_WIDTH = LEVEL_WIDTH * 16;
 const float GAME_HEIGHT = LEVEL_HEIGHT * 16;
 
-// These should line up with character types
+// how long the player has to live in these bodies
 const float CHARACTER_TYPE_LIFESPANS[] = {
         0, // CHARACTER_TYPE_INVALID,
         15, // CHARACTER_TYPE_JUMPER,
@@ -59,7 +59,7 @@ const float CHARACTER_TYPE_LIFESPANS[] = {
         3, // CHARACTER_TYPE_LASER,
 };
 
-
+// acceleration values for the ai, player uses this * a constant as well
 const float ACCELERATION_VALUES[] = {
         0, // CHARACTER_TYPE_INVALID,
         0.12, // CHARACTER_TYPE_JUMPER,
@@ -68,6 +68,50 @@ const float ACCELERATION_VALUES[] = {
         0.08, // CHARACTER_TYPE_XY_SHOOTER,
         0.2, // CHARACTER_TYPE_SWORDSMITH,
         0.02, // CHARACTER_TYPE_LASER,
+};
+
+// how long after taking an action an ai is allowed to take it again
+const float ACTION_COOLDOWNS[] = {
+        0, // CHARACTER_TYPE_INVALID,
+        0.8, // CHARACTER_TYPE_JUMPER,
+        1, // CHARACTER_TYPE_X_SHOOTER,
+        1, // CHARACTER_TYPE_Y_SHOOTER,
+        0.5, // CHARACTER_TYPE_XY_SHOOTER,
+        0, // CHARACTER_TYPE_SWORDSMITH,
+        3, // CHARACTER_TYPE_LASER,
+};
+
+// how long an ai has to telegraph an action
+const float ACTION_TELEGRAPH_TIMES[] = {
+        0, // CHARACTER_TYPE_INVALID,
+        0.2, // CHARACTER_TYPE_JUMPER,
+        0.5, // CHARACTER_TYPE_X_SHOOTER,
+        0.3, // CHARACTER_TYPE_Y_SHOOTER,
+        0.1, // CHARACTER_TYPE_XY_SHOOTER,
+        1, // CHARACTER_TYPE_SWORDSMITH,
+        3, // CHARACTER_TYPE_LASER,
+};
+
+// chance on each potential action frame ai will do something
+const float ACTION_CHANCE[] = {
+        0, // CHARACTER_TYPE_INVALID,
+        0.4, // CHARACTER_TYPE_JUMPER,
+        0.5, // CHARACTER_TYPE_X_SHOOTER,
+        0.5, // CHARACTER_TYPE_Y_SHOOTER,
+        0.5, // CHARACTER_TYPE_XY_SHOOTER,
+        0.5, // CHARACTER_TYPE_SWORDSMITH,
+        0.5, // CHARACTER_TYPE_LASER,
+};
+
+// every x frames the above chances are rolled
+const int ACTION_CHANCE_FREQUENCY[] = {
+        0, // CHARACTER_TYPE_INVALID,
+        5, // CHARACTER_TYPE_JUMPER,
+        6, // CHARACTER_TYPE_X_SHOOTER,
+        7, // CHARACTER_TYPE_Y_SHOOTER,
+        8, // CHARACTER_TYPE_XY_SHOOTER,
+        9, // CHARACTER_TYPE_SWORDSMITH,
+        10, // CHARACTER_TYPE_LASER,
 };
 
 #define MAX_CHARACTERS 100
@@ -88,6 +132,9 @@ const int32_t START_REQ_KILLS = 3;
 const float ENEMY_FLING_SPEED = 5;
 const int32_t PLAYER_I_FRAMES = 30;
 const float PLAYER_SPEED_FACTOR = 3; // how much fast the player is than the ai in the same types
+const float X_SHOOTER_BULLET_LIFETIME = 2;
+const float X_SHOOTER_BULLET_SPEED = 12;
+const float X_SHOOTER_RECOIL = 4;
 
 ///////////////////////// STRUCTS /////////////////////////
 typedef struct PhysicsObject_t {
@@ -124,6 +171,10 @@ typedef struct Character_t {
     PhysicsObject physx;
     float facing; // direction facing, -1 or 1
     float shown_facing; // for a cool visual effect
+
+    // for telegraphing ai behaviour
+    bool wants_to_action; // might be unnecessary idk
+    float action_timer; // how long until action will be taken
 
     float direction; // relevant for ai
     bool player_controlled; // True if this is the current player false means AI
@@ -203,6 +254,7 @@ typedef struct GameState_t {
     int32_t player_iframes; // after getting hit
 
     Oct_SpriteInstance fire;
+    float score; // literally just 1 per frame
 
     Oct_Tilemap level_map;
     Character characters[MAX_CHARACTERS];
@@ -434,6 +486,16 @@ void draw_character(Character *character) {
                 (Oct_Vec2){character->physx.x - 33 + (character->physx.bb_width / 2), character->physx.y - 80 + character->physx.bb_height});
     }
 
+    // Draw telegraphing effect
+    if (character->wants_to_action && !character->player_controlled) {
+        const float x = character->physx.x + (character->physx.bb_width / 2) - 8.5;
+        oct_DrawTextureInt(
+                OCT_INTERPOLATE_ALL, character->id + 4,
+                oct_GetAsset(gBundle, "textures/angry.png"),
+                (Oct_Vec2){x, character->physx.y - 17}
+                );
+    }
+
     if (character->type == CHARACTER_TYPE_JUMPER) {
         const float x = character->facing == 1 ? character->physx.x : (character->physx.x + character->physx.bb_width);
         character->shown_facing += (character->facing - character->shown_facing) * 0.6;
@@ -447,6 +509,7 @@ void draw_character(Character *character) {
                 0, (Oct_Vec2){0, 0});
     }  else if (character->type == CHARACTER_TYPE_X_SHOOTER) {
         const float x = character->facing == 1 ? character->physx.x : (character->physx.x + character->physx.bb_width);
+        const float gun_x = character->facing == 1 ? (character->physx.x + character->physx.bb_width) : character->physx.x;
         character->shown_facing += (character->facing - character->shown_facing) * 0.6;
         oct_DrawSpriteIntColourExt(
                 OCT_INTERPOLATE_ALL, character->id,
@@ -460,12 +523,13 @@ void draw_character(Character *character) {
                 OCT_INTERPOLATE_ALL, character->id + 3,
                 oct_GetAsset(gBundle, "textures/gun.png"),
                 &c,
-                (Oct_Vec2) {x + 12, character->physx.y},
+                (Oct_Vec2) {gun_x, character->physx.y - 8},
                 (Oct_Vec2){character->shown_facing, 1},
                 0, (Oct_Vec2){0, 0});
     } // TODO: The rest of these
 }
 
+void shoot_x_bullet(Character *character);
 InputProfile process_player(Character *character) {
     InputProfile input = {0};
     state.player_iframes -= 1;
@@ -478,12 +542,26 @@ InputProfile process_player(Character *character) {
     }
     const bool kinda_touching_ground = collision_at(character, null, character->physx.x, character->physx.y + 1, character->physx.bb_width, character->physx.bb_height).type;
 
-    if (kinda_touching_ground && (oct_KeyPressed(OCT_KEY_SPACE) || oct_KeyPressed(OCT_KEY_UP) || oct_GamepadButtonPressed(0, OCT_GAMEPAD_BUTTON_A))) {
+    // jumping (player can always jump)
+    if (kinda_touching_ground && (oct_KeyPressed(OCT_KEY_UP) || oct_GamepadButtonPressed(0, OCT_GAMEPAD_BUTTON_A))) {
         input.y_acc = -PLAYER_JUMP_SPEED;
         oct_PlaySound(
                 oct_GetAsset(gBundle, "sounds/jump.wav"),
                 (Oct_Vec2){0.5, 0.5},
                 false);
+    }
+
+    // action depending on type of entity
+    if (oct_KeyPressed(OCT_KEY_SPACE) || oct_GamepadButtonPressed(0, OCT_GAMEPAD_BUTTON_X)) {
+        if (character->type == CHARACTER_TYPE_X_SHOOTER) {
+            shoot_x_bullet(character);
+        }
+    }
+
+    // dont fall off edge
+    if (character->physx.y > GAME_HEIGHT) {
+        character->physx.x = 15.5 * 16;
+        character->physx.y = 11 * 16;
     }
 
     return input;
@@ -523,6 +601,24 @@ void take_body(Character *character) {
     // kill old player
     player->player_controlled = false;
     kill_character(false, player, true);
+}
+
+// shoot horizontal bullet
+void shoot_x_bullet(Character *character) {
+    const float x = character->facing == 1 ? character->physx.x + character->physx.bb_width + 10 : character->physx.x -12;
+    create_projectile(
+            character->player_controlled,
+            oct_GetAsset(gBundle, "textures/bullet.png"),
+            X_SHOOTER_BULLET_LIFETIME,
+            x,
+            character->physx.y,
+            X_SHOOTER_BULLET_SPEED * character->facing,
+            0);
+    oct_PlaySound(
+            oct_GetAsset(gBundle, "sounds/gunshot.wav"),
+            (Oct_Vec2){1, 1},
+            false);
+    character->physx.x_vel -= X_SHOOTER_RECOIL * character->facing;
 }
 
 void kill_character(bool player_is_the_killer, Character *character, bool dramatic) {
@@ -599,22 +695,56 @@ void kill_character(bool player_is_the_killer, Character *character, bool dramat
     }
 }
 
+InputProfile pre_process_ai(Character *character) {
+    InputProfile input = {0};
+
+    // Get input from ai
+    input.x_acc = ACCELERATION_VALUES[character->type] * character->direction;
+    const bool kinda_touching_ground = collision_at(character, null, character->physx.x, character->physx.y + 1, character->physx.bb_width, character->physx.bb_height).type != 0;
+
+    // Jumpers might jump every now and again
+    if (character->type == CHARACTER_TYPE_JUMPER) {
+        if (gFrameCounter % ACTION_CHANCE_FREQUENCY[character->type] == 0 &&
+            oct_Random(0, 1) > ACTION_CHANCE[character->type] &&
+            kinda_touching_ground &&
+            character->action_timer <= ACTION_COOLDOWNS[character->type]) {
+
+            character->wants_to_action = true;
+            character->action_timer = ACTION_TELEGRAPH_TIMES[character->type];
+        }
+
+        if (character->wants_to_action && character->action_timer <= 0) {
+            input.y_acc = -PLAYER_JUMP_SPEED;
+            character->wants_to_action = false;
+        }
+    } else if (character->type == CHARACTER_TYPE_X_SHOOTER) {
+               if (gFrameCounter % ACTION_CHANCE_FREQUENCY[character->type] == 0 &&
+               oct_Random(0, 1) > ACTION_CHANCE[character->type] &&
+               kinda_touching_ground &&
+               character->action_timer <= ACTION_COOLDOWNS[character->type]) {
+
+            character->wants_to_action = true;
+            character->action_timer = ACTION_TELEGRAPH_TIMES[character->type];
+        }
+
+        if (character->wants_to_action && character->action_timer <= 0) {
+            shoot_x_bullet(character);
+            character->wants_to_action = false;
+        }
+    }
+
+    character->action_timer -= 1.0/30.0;
+
+    return input;
+}
+
 void process_character(Character *character) {
     // This is only to handle input
     InputProfile input = {0};
     if (character->player_controlled) {
         input = process_player(character);
     } else {
-        // Get input from ai
-        input.x_acc = ACCELERATION_VALUES[character->type] * character->direction;
-        const bool kinda_touching_ground = collision_at(character, null, character->physx.x, character->physx.y + 1, character->physx.bb_width, character->physx.bb_height).type != 0;
-
-        // Jumpers might jump every now and again
-        if (character->type == CHARACTER_TYPE_JUMPER) {
-            if (gFrameCounter % 5 == 0 && oct_Random(0, 1) > 0.5 && kinda_touching_ground) {
-                input.y_acc = -PLAYER_JUMP_SPEED;
-            }
-        }
+        input = pre_process_ai(character);
     }
 
     if (input.x_acc != 0) {
@@ -629,11 +759,8 @@ void process_character(Character *character) {
         if (y_collision.type == COLLISION_EVENT_TYPE_CHARACTER) {
             kill_character(character->player_controlled, y_collision.character, false);
 
-            // fly away if not the player
-            if (!character->player_controlled) {
-                character->physx.y_vel -= PLAYER_JUMP_SPEED;
-                character->physx.x_vel = oct_Random(-ENEMY_FLING_SPEED, ENEMY_FLING_SPEED);
-            }
+            character->physx.y_vel -= PLAYER_JUMP_SPEED;
+            character->physx.x_vel = oct_Random(-ENEMY_FLING_SPEED, ENEMY_FLING_SPEED);
         }
     }
 
@@ -724,6 +851,17 @@ void process_projectile(Projectile *projectile) {
             projectile->physx.bb_height);
     if (event.type == COLLISION_EVENT_TYPE_CHARACTER) {
         kill_character(projectile->player_bullet, event.character, false);
+        create_particles_job(&(CreateParticlesJob){
+                .variation = 1,
+                .y_vel = 0,
+                .x_vel = 0,
+                .tex = oct_GetAsset(gBundle, "textures/bullet.png"),
+                .spr = OCT_NO_ASSET,
+                .x = projectile->physx.x,
+                .y = projectile->physx.y,
+                .count = 1,
+                .lifetime = 1
+        });
         projectile->alive = false;
     }
 
@@ -731,6 +869,18 @@ void process_projectile(Projectile *projectile) {
     projectile->lifetime -= 1.0 / 30.0;
     if (projectile->lifetime <= 0) {
         projectile->alive = false;
+        create_particles_job(&(CreateParticlesJob){
+                .variation = 1,
+                .y_vel = 0,
+                .x_vel = 0,
+                .tex = oct_GetAsset(gBundle, "textures/bullet.png"),
+                .spr = OCT_NO_ASSET,
+                .x = projectile->physx.x,
+                .y = projectile->physx.y,
+                .count = 1,
+                .lifetime = 1
+        });
+
     }
 
     // draw
@@ -753,6 +903,13 @@ Character *add_character(Character *character) {
 
             // Handle sprite instance & bounding box
             if (slot->type == CHARACTER_TYPE_JUMPER) {
+                oct_InitSpriteInstance(&slot->sprite, character_type_sprite(slot), true);
+                slot->physx.bb_width = 12;
+                slot->physx.bb_height = 12;
+                slot->facing = 1;
+                slot->id = gParticleIDs;
+                gParticleIDs += 10;
+            } else if (slot->type == CHARACTER_TYPE_X_SHOOTER) {
                 oct_InitSpriteInstance(&slot->sprite, character_type_sprite(slot), true);
                 slot->physx.bb_width = 12;
                 slot->physx.bb_height = 12;
@@ -814,7 +971,7 @@ Projectile *create_projectile(bool player_shot, Oct_Texture tex, float lifetime,
                     slot->physx.y,
                     slot->physx.bb_width,
                     slot->physx.bb_height);
-            if (event.type != COLLISION_EVENT_TYPE_NO_COLLISION) {
+            if (event.type == COLLISION_EVENT_TYPE_WALL || event.type == COLLISION_EVENT_TYPE_BOUNCY_WALL || event.type == COLLISION_EVENT_TYPE_PROJECTILE) {
                 slot->alive = false;
                 slot = null;
             }
@@ -862,7 +1019,7 @@ void game_begin() {
 
     // Add the player
     state.player = add_character(&(Character){
-        .type = CHARACTER_TYPE_JUMPER,
+        .type = CHARACTER_TYPE_X_SHOOTER,
         .player_controlled = true,
         .physx = {
                 .x = 15.5 * 16,
@@ -965,13 +1122,14 @@ GameStatus game_update() {
     } else {
         // Draw total time
         Oct_Vec2 size;
-        oct_GetTextSize(kingdom, size, 1, "%.1fs", state.total_time);
+        oct_GetTextSize(kingdom, size, 1, "Score: %i", (int)state.total_time);
         oct_DrawTextColour(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (size[0] / 2) + 1, 22}, &(Oct_Colour) {0, 0, 0, 1},
-                           1, "%.1fs", state.total_time);
-        oct_DrawText(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (size[0] / 2), 21}, 1, "%.1fs", state.total_time);
+                           1, "Score: %i", (int)state.total_time);
+        oct_DrawText(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (size[0] / 2), 21}, 1, "Score: %i", (int)state.total_time);
     }
 
     state.total_time += 1.0 / 30.0;
+    state.score += 1;
 
     // Spawn more enemies
     if (gFrameCounter % 30 == 0) {

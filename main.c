@@ -50,23 +50,12 @@ const float GAME_HEIGHT = LEVEL_HEIGHT * 16;
 // These should line up with character types
 const float CHARACTER_TYPE_LIFESPANS[] = {
         0, // CHARACTER_TYPE_INVALID,
-        5, // CHARACTER_TYPE_JUMPER,
-        5, // CHARACTER_TYPE_X_SHOOTER,
-        5, // CHARACTER_TYPE_Y_SHOOTER,
-        6, // CHARACTER_TYPE_XY_SHOOTER,
-        4, // CHARACTER_TYPE_SWORDSMITH,
+        15, // CHARACTER_TYPE_JUMPER,
+        10, // CHARACTER_TYPE_X_SHOOTER,
+        20, // CHARACTER_TYPE_Y_SHOOTER,
+        10, // CHARACTER_TYPE_XY_SHOOTER,
+        8, // CHARACTER_TYPE_SWORDSMITH,
         3, // CHARACTER_TYPE_LASER,
-};
-
-// HP ranges for each character, also should match up with character types
-const Oct_Vec2 CHARACTER_HP_RANGES[] = {
-        {0, 0}, // CHARACTER_TYPE_INVALID,
-        {90, 100}, // CHARACTER_TYPE_JUMPER,
-        {90, 100}, // CHARACTER_TYPE_X_SHOOTER,
-        {90, 100}, // CHARACTER_TYPE_Y_SHOOTER,
-        {90, 100}, // CHARACTER_TYPE_XY_SHOOTER,
-        {90, 100}, // CHARACTER_TYPE_SWORDSMITH,
-        {90, 100}, // CHARACTER_TYPE_LASER,
 };
 
 #define MAX_CHARACTERS 100
@@ -84,7 +73,7 @@ const float AI_ACCELERATION = 0.15;
 const float PLAYER_JUMP_SPEED = 7;
 const float PARTICLES_GROUND_IMPACT_SPEED = 6;
 const float SPEED_LIMIT = 12;
-const float PLAYER_STARTING_LIFESPAN = 10; // seconds;
+const float PLAYER_STARTING_LIFESPAN = 30; // seconds;
 
 ///////////////////////// STRUCTS /////////////////////////
 typedef struct PhysicsObject_t {
@@ -119,8 +108,6 @@ typedef struct Character_t {
     Oct_SpriteInstance sprite;
     bool alive;
     PhysicsObject physx;
-    float max_hp; // Only applies to ai, players get 1 tapped bozo
-    float hp;
 
     float direction; // relevant for ai
     bool player_controlled; // True if this is the current player false means AI
@@ -226,9 +213,9 @@ void create_particles_job(CreateParticlesJob *data) {
             };
             p->lifetime = job->lifetime;
             p->total_lifetime = job->lifetime;
-            p->sprite = job->spr;
-            oct_InitSpriteInstance(&p->instance, job->spr, true);
             p->texture = job->tex;
+            if (p->sprite_based) p->sprite = job->spr;
+            oct_InitSpriteInstance(&p->instance, job->spr, true);
             p->id = 10000000 + spot;
             p->alive = true;
         }
@@ -241,6 +228,31 @@ static inline float sign(float x) {
 
 static inline bool aabb(float x1, float y1, float w1, float h1, float x2, float y2, float w2, float h2) {
     return x1 < x2 + w2 && x1 + w1 > x2 && y1 < y2 + h2 && y1 + h1 > y2;
+}
+
+// returns the sprite corresponding to a certain character type
+Oct_Sprite character_type_sprite(Character *character) {
+    if (character->player_controlled) {
+        switch (character->type) {
+            case CHARACTER_TYPE_JUMPER: return oct_GetAsset(gBundle, "sprites/playerjumper.json");
+            case CHARACTER_TYPE_X_SHOOTER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
+            case CHARACTER_TYPE_Y_SHOOTER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
+            case CHARACTER_TYPE_XY_SHOOTER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
+            case CHARACTER_TYPE_SWORDSMITH: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
+            case CHARACTER_TYPE_LASER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
+            default: return OCT_NO_ASSET;
+        }
+    }
+
+    switch (character->type) {
+        case CHARACTER_TYPE_JUMPER: return oct_GetAsset(gBundle, "sprites/jumper.json");
+        case CHARACTER_TYPE_X_SHOOTER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
+        case CHARACTER_TYPE_Y_SHOOTER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
+        case CHARACTER_TYPE_XY_SHOOTER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
+        case CHARACTER_TYPE_SWORDSMITH: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
+        case CHARACTER_TYPE_LASER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
+        default: return OCT_NO_ASSET;
+    }
 }
 
 // checks for collisions against the tilemap
@@ -361,35 +373,11 @@ void draw_character(Character *character) {
     if (character->type == CHARACTER_TYPE_JUMPER) {
         oct_DrawSpriteInt(
                 OCT_INTERPOLATE_ALL, character->id,
-                oct_GetAsset(gBundle, "sprites/jumper.json"),
+                character_type_sprite(character),
                 &character->sprite,
                 (Oct_Vec2) {character->physx.x, character->physx.y}
                 );
     } // TODO: The rest of these
-
-    // Draw healthbar
-    const float percent = character->hp / character->max_hp;
-    const float x = character->physx.x;
-    const float y = character->physx.y - 4;
-    /* TODO: This is fucked for some reason
-    oct_DrawRectangleIntColour(
-            OCT_INTERPOLATE_ALL, character->id + 1,
-            &(Oct_Colour){0, 0, 0, 1},
-            &(Oct_Rectangle){
-                    .size = {character->physx.bb_width, 2},
-                    .position = {x, y}
-            },
-            true,
-            1);
-    oct_DrawRectangleIntColour(
-            OCT_INTERPOLATE_ALL, character->id + 1,
-            &(Oct_Colour){59.0 / 255.0, 148.0 / 255.0, 45.0 / 255.0, 1},
-            &(Oct_Rectangle){
-                    .size = {character->physx.bb_width * percent, 2},
-                    .position = {x, y}
-            },
-            true,
-            1);*/
 }
 
 InputProfile process_player(Character *character) {
@@ -408,6 +396,24 @@ InputProfile process_player(Character *character) {
     }
 
     return input;
+}
+
+void kill_character(Character *character) {
+    if (!character->player_controlled) {
+        character->alive = false;
+        create_particles_job(&(CreateParticlesJob){
+            .lifetime = 3,
+            .count = 1,
+            .variation = 1,
+            .spr = character_type_sprite(character),
+            .tex = OCT_NO_ASSET,
+            .x = character->physx.x,
+            .y = character->physx.y,
+            .y_vel = -2
+        });
+    } else {
+        // todo: explosion particle
+    }
 }
 
 void process_character(Character *character) {
@@ -438,6 +444,16 @@ void process_character(Character *character) {
         // If they fall out the map they die :skull: -- player will handle their own deaths
         if (character->physx.y > GAME_HEIGHT) {
             character->alive = false;
+        }
+    } else {
+        // Handle player specific events
+        if (character->type == CHARACTER_TYPE_JUMPER) {
+            // Jump on enemy head should kill them
+            const CollisionEvent y_collision = collision_at(character, null, character->physx.x, character->physx.y + 2, character->physx.bb_width, character->physx.bb_height);
+            if (y_collision.type == COLLISION_EVENT_TYPE_CHARACTER) {
+                kill_character(y_collision.character);
+                // todo: other effects later?
+            }
         }
     }
 
@@ -516,11 +532,10 @@ Character *add_character(Character *character) {
             slot = &state.characters[i];
             memcpy(slot, character, sizeof(struct Character_t));
             slot->alive = true;
-            slot->hp = slot->max_hp;
 
             // Handle sprite instance & bounding box
             if (slot->type == CHARACTER_TYPE_JUMPER) {
-                oct_InitSpriteInstance(&slot->sprite, oct_GetAsset(gBundle, "sprites/jumper.json"), true);
+                oct_InitSpriteInstance(&slot->sprite, character_type_sprite(slot), true);
                 slot->physx.bb_width = 12;
                 slot->physx.bb_height = 12;
                 slot->id = 10000 + i * 2;
@@ -544,7 +559,6 @@ Character *add_ai(CharacterType type) {
 
     return add_character(&(Character){
             .type = type,
-            .max_hp = oct_Random(CHARACTER_HP_RANGES[type][0], CHARACTER_HP_RANGES[type][1]),
             .physx = {
                     .x = x_spawn,
                     .y = -16,
@@ -661,9 +675,14 @@ GameStatus game_update() {
     const Oct_FontAtlas kingdom = oct_GetAsset(gBundle, "fnt_kingdom");
     Oct_Vec2 size;
     oct_GetTextSize(kingdom, size, 1, "%.1fs", state.total_time);
-    oct_DrawTextColour(kingdom, (Oct_Vec2){(GAME_WIDTH / 2) - (size[0] / 2) + 1, 21}, &(Oct_Colour){0, 0, 0, 1}, 1, "%.1fs", state.total_time);
-    oct_DrawText(kingdom, (Oct_Vec2){(GAME_WIDTH / 2) - (size[0] / 2), 20}, 1, "%.1fs", state.total_time);
+    oct_DrawTextColour(kingdom, (Oct_Vec2){(GAME_WIDTH / 2) - (size[0] / 2) + 1, 22}, &(Oct_Colour){0, 0, 0, 1}, 1, "%.1fs", state.total_time);
+    oct_DrawText(kingdom, (Oct_Vec2){(GAME_WIDTH / 2) - (size[0] / 2), 21}, 1, "%.1fs", state.total_time);
     state.total_time += 1.0 / 30.0;
+
+    // Spawn more enemies
+    if (gFrameCounter % 30 == 0) {
+        add_ai(CHARACTER_TYPE_JUMPER);
+    }
 
     // just particles
     oct_WaitJobs();

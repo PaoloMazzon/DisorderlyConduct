@@ -36,6 +36,7 @@ Oct_Allocator gAllocator;
 Oct_Allocator gFrameAllocator; // arena for frame-time allocations
 Oct_Texture gBackBuffer;
 uint64_t gFrameCounter;
+uint64_t gParticleIDs = 999999;
 
 ///////////////////////// CONSTANTS /////////////////////////
 
@@ -74,6 +75,7 @@ const float PLAYER_JUMP_SPEED = 7;
 const float PARTICLES_GROUND_IMPACT_SPEED = 6;
 const float SPEED_LIMIT = 12;
 const float PLAYER_STARTING_LIFESPAN = 30; // seconds;
+const int32_t START_REQ_KILLS = 3;
 
 ///////////////////////// STRUCTS /////////////////////////
 typedef struct PhysicsObject_t {
@@ -179,6 +181,9 @@ typedef struct GameState_t {
     float max_lifespan;
     Character *player;
     float total_time;
+    int req_kills; // for transforming
+    int current_kills;
+    float displayed_kills; // for lerping a nice val
 
     Oct_Tilemap level_map;
     Character characters[MAX_CHARACTERS];
@@ -216,7 +221,7 @@ void create_particles_job(CreateParticlesJob *data) {
             p->texture = job->tex;
             if (p->sprite_based) p->sprite = job->spr;
             oct_InitSpriteInstance(&p->instance, job->spr, true);
-            p->id = 10000000 + spot;
+            p->id = gParticleIDs++;
             p->alive = true;
         }
     }
@@ -398,6 +403,25 @@ InputProfile process_player(Character *character) {
     return input;
 }
 
+// transforms the player into this dude
+void take_body(Character *character) {
+    // reset kills and show a nice particle effect
+    state.req_kills++;
+    state.current_kills = 0;
+    create_particles_job(&(CreateParticlesJob){
+            .lifetime = 3,
+            .count = 10,
+            .variation = 1,
+            .spr = OCT_NO_ASSET,
+            .tex = oct_GetAsset(gBundle, "textures/thumbsup.png"),
+            .x = GAME_WIDTH / 2,
+            .y = 48,
+            .y_vel = -2
+    });
+
+    // TODO: This
+}
+
 void kill_character(Character *character) {
     if (!character->player_controlled) {
         character->alive = false;
@@ -411,6 +435,11 @@ void kill_character(Character *character) {
             .y = character->physx.y,
             .y_vel = -2
         });
+        state.current_kills += 1;
+
+        if (state.current_kills >= state.req_kills) {
+            take_body(character);
+        }
     } else {
         // todo: explosion particle
     }
@@ -574,6 +603,7 @@ void game_begin() {
             oct_GetAsset(gBundle, "textures/tileset.png"),
             LEVEL_WIDTH, LEVEL_HEIGHT,
             (Oct_Vec2){16, 16});
+    state.req_kills = START_REQ_KILLS;
 
     // Open json with level
     uint32_t size;
@@ -638,11 +668,6 @@ GameStatus game_update() {
         process_projectile(&state.projectiles[i]);
     }
 
-    for (int i = 0; i < MAX_PARTICLES; i++) {
-        if (!state.particles[i].alive) continue;
-        process_particle(&state.particles[i]);
-    }
-
     // draw player time left
     const float percent = oct_Clamp(0, 1, state.lifespan / state.max_lifespan);
     const float x = (GAME_WIDTH / 2) - (112 / 2);
@@ -671,6 +696,33 @@ GameStatus game_update() {
     oct_Draw(&cmd);
     state.lifespan -= 1.0 / 30.0;
 
+    const float percent_kills = oct_Clamp(0, 1, (state.displayed_kills / ((float)state.req_kills)));
+    state.displayed_kills += (state.current_kills - state.displayed_kills) * 0.5;
+    const float x2 = (GAME_WIDTH / 2) - (92 / 2);
+    const float y2 = 48;
+    oct_DrawTexture(
+            oct_GetAsset(gBundle, "textures/killcountempty.png"),
+            (Oct_Vec2){x2, y2}
+    );
+    Oct_DrawCommand cmd2 = {
+            .type = OCT_DRAW_COMMAND_TYPE_TEXTURE,
+            .interpolate = OCT_INTERPOLATE_ALL,
+            .id = 42069,
+            .colour = {1, 1, 1, 1},
+            .Texture = {
+                    .texture = oct_GetAsset(gBundle, "textures/killcount.png"),
+                    .viewport = (Oct_Rectangle){
+                            .position = {0, 0},
+                            .size = {92 * percent_kills, 10},
+                    },
+                    .position = {x2, y2},
+                    .scale = {1, 1},
+                    .origin = {0, 0},
+                    .rotation = 0,
+            }
+    };
+    oct_Draw(&cmd2);
+
     // Draw total time
     const Oct_FontAtlas kingdom = oct_GetAsset(gBundle, "fnt_kingdom");
     Oct_Vec2 size;
@@ -682,6 +734,12 @@ GameStatus game_update() {
     // Spawn more enemies
     if (gFrameCounter % 30 == 0) {
         add_ai(CHARACTER_TYPE_JUMPER);
+    }
+
+    // particles on top for some fucking reason
+    for (int i = 0; i < MAX_PARTICLES; i++) {
+        if (!state.particles[i].alive) continue;
+        process_particle(&state.particles[i]);
     }
 
     // just particles
@@ -721,6 +779,7 @@ void *startup() {
 
     // oct shit
     oct_GamepadSetAxisDeadzone(GAMEPAD_DEADZONE);
+    oct_SetFullscreen(true);
 
     return null;
 }

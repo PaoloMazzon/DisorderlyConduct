@@ -185,6 +185,8 @@ typedef struct GameState_t {
     int current_kills;
     float displayed_kills; // for lerping a nice val
 
+    Oct_SpriteInstance fire;
+
     Oct_Tilemap level_map;
     Character characters[MAX_CHARACTERS];
     Projectile projectiles[MAX_PROJECTILES];
@@ -192,6 +194,8 @@ typedef struct GameState_t {
 } GameState;
 
 GameState state;
+
+#define NEAR_LEVEL_UP (state.req_kills - 1 == state.current_kills)
 
 ///////////////////////// HELPERS /////////////////////////
 void create_particles_job(CreateParticlesJob *data) {
@@ -334,6 +338,14 @@ bool process_physics(Character *this_c, Projectile *this_p, PhysicsObject *physx
         while (!collision_at(this_c, this_p, physx->x + (sign(physx->x_vel) * 0.1), physx->y, physx->bb_width, physx->bb_height).type)
             physx->x += (sign(physx->x_vel) * 0.1);
 
+        // Sound effect when dashing into a wall
+        if (physx->x_vel > PARTICLES_GROUND_IMPACT_SPEED) {
+            oct_PlaySound(
+                    oct_GetAsset(gBundle, "sounds/bumpwall.wav"),
+                    (Oct_Vec2){0.2, 0.2},
+                    false);
+        }
+
         // Bounce off the wall slightly
         if (ce.type == COLLISION_EVENT_TYPE_BOUNCY_WALL)
             physx->x_vel = physx->x_vel * (-BOUNCE_PRESERVED_BOUNCE_WALL);
@@ -362,6 +374,10 @@ bool process_physics(Character *this_c, Projectile *this_p, PhysicsObject *physx
                 .count = 10,
                 .lifetime = 1
             });
+            oct_PlaySound(
+                    oct_GetAsset(gBundle, "sounds/bumpwall.wav"),
+                    (Oct_Vec2){0.2, 0.2},
+                    false);
         }
 
         // Bounce off the wall slightly
@@ -375,6 +391,15 @@ bool process_physics(Character *this_c, Projectile *this_p, PhysicsObject *physx
 }
 
 void draw_character(Character *character) {
+    // draw fire effect when time to level up or whatever its called
+    if (character->player_controlled && NEAR_LEVEL_UP) {
+        // 49, 95
+        oct_DrawSpriteInt(
+                OCT_INTERPOLATE_ALL, 666,
+                oct_GetAsset(gBundle, "sprites/fire.json"), &state.fire,
+                (Oct_Vec2){character->physx.x - 33 + (character->physx.bb_width / 2), character->physx.y - 80 + character->physx.bb_height});
+    }
+
     if (character->type == CHARACTER_TYPE_JUMPER) {
         oct_DrawSpriteInt(
                 OCT_INTERPOLATE_ALL, character->id,
@@ -398,16 +423,22 @@ InputProfile process_player(Character *character) {
 
     if (kinda_touching_ground && (oct_KeyPressed(OCT_KEY_SPACE) || oct_KeyPressed(OCT_KEY_UP) || oct_GamepadButtonPressed(0, OCT_GAMEPAD_BUTTON_A))) {
         input.y_acc = -PLAYER_JUMP_SPEED;
+        oct_PlaySound(
+                oct_GetAsset(gBundle, "sounds/jump.wav"),
+                (Oct_Vec2){0.5, 0.5},
+                false);
     }
 
     return input;
 }
 
+void kill_character(Character *character, bool dramatic);
+
 // transforms the player into this dude
 void take_body(Character *character) {
     // reset kills and show a nice particle effect
     state.req_kills++;
-    state.current_kills = 0;
+    state.current_kills = -1;
     create_particles_job(&(CreateParticlesJob){
             .lifetime = 3,
             .count = 10,
@@ -419,16 +450,31 @@ void take_body(Character *character) {
             .y_vel = -2
     });
 
-    // TODO: This
+    // Take dudes body
+    Character *player = state.player;
+    state.player = character;
+    character->player_controlled = true;
+    character->alive = true;
+    state.max_lifespan = CHARACTER_TYPE_LIFESPANS[character->type];
+    state.lifespan = CHARACTER_TYPE_LIFESPANS[character->type];
+
+    oct_PlaySound(
+            oct_GetAsset(gBundle, "sounds/transform.wav"),
+            (Oct_Vec2){1, 1},
+            false);
+
+    // kill old player
+    player->player_controlled = false;
+    kill_character(player, true);
 }
 
-void kill_character(Character *character) {
+void kill_character(Character *character, bool dramatic) {
     if (!character->player_controlled) {
         character->alive = false;
         create_particles_job(&(CreateParticlesJob){
             .lifetime = 3,
             .count = 1,
-            .variation = 1,
+            .variation = dramatic ? 3 : 1,
             .spr = character_type_sprite(character),
             .tex = OCT_NO_ASSET,
             .x = character->physx.x,
@@ -436,6 +482,23 @@ void kill_character(Character *character) {
             .y_vel = -2
         });
         state.current_kills += 1;
+
+        // small sound
+        oct_PlaySound(
+                oct_GetAsset(gBundle, "sounds/jumpenemy.wav"),
+                (Oct_Vec2){1, 1},
+                false);
+
+        create_particles_job(&(CreateParticlesJob){
+                .lifetime = 3,
+                .count = dramatic ? 20 : 8,
+                .variation = dramatic ? 3 : 1,
+                .spr = OCT_NO_ASSET,
+                .tex = oct_GetAsset(gBundle, "textures/blood.png"),
+                .x = character->physx.x + (character->physx.bb_width / 2),
+                .y = character->physx.y + (character->physx.bb_height / 2),
+                .y_vel = -2
+        });
 
         if (state.current_kills >= state.req_kills) {
             take_body(character);
@@ -480,7 +543,7 @@ void process_character(Character *character) {
             // Jump on enemy head should kill them
             const CollisionEvent y_collision = collision_at(character, null, character->physx.x, character->physx.y + 2, character->physx.bb_width, character->physx.bb_height);
             if (y_collision.type == COLLISION_EVENT_TYPE_CHARACTER) {
-                kill_character(y_collision.character);
+                kill_character(y_collision.character, false);
                 // todo: other effects later?
             }
         }
@@ -604,6 +667,7 @@ void game_begin() {
             LEVEL_WIDTH, LEVEL_HEIGHT,
             (Oct_Vec2){16, 16});
     state.req_kills = START_REQ_KILLS;
+    oct_InitSpriteInstance(&state.fire, oct_GetAsset(gBundle, "sprites/fire.json"), true);
 
     // Open json with level
     uint32_t size;
@@ -696,7 +760,7 @@ GameStatus game_update() {
     oct_Draw(&cmd);
     state.lifespan -= 1.0 / 30.0;
 
-    const float percent_kills = oct_Clamp(0, 1, (state.displayed_kills / ((float)state.req_kills)));
+    const float percent_kills = oct_Clamp(0, 1, (state.displayed_kills / ((float)state.req_kills - 1)));
     state.displayed_kills += (state.current_kills - state.displayed_kills) * 0.5;
     const float x2 = (GAME_WIDTH / 2) - (92 / 2);
     const float y2 = 48;
@@ -723,12 +787,24 @@ GameStatus game_update() {
     };
     oct_Draw(&cmd2);
 
-    // Draw total time
     const Oct_FontAtlas kingdom = oct_GetAsset(gBundle, "fnt_kingdom");
-    Oct_Vec2 size;
-    oct_GetTextSize(kingdom, size, 1, "%.1fs", state.total_time);
-    oct_DrawTextColour(kingdom, (Oct_Vec2){(GAME_WIDTH / 2) - (size[0] / 2) + 1, 22}, &(Oct_Colour){0, 0, 0, 1}, 1, "%.1fs", state.total_time);
-    oct_DrawText(kingdom, (Oct_Vec2){(GAME_WIDTH / 2) - (size[0] / 2), 21}, 1, "%.1fs", state.total_time);
+    // If user is 1 kill away from transforming, tell them
+    if (state.req_kills -1 == state.current_kills) {
+        Oct_Vec2 text_size;
+        const float scale = (sin(oct_Time() * 4) / 4) + 1;
+        oct_GetTextSize(kingdom, text_size, scale, "Transform!");
+        oct_DrawTextColour(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (text_size[0] / 2) + 1, 32 - (text_size[1] / 2) + 1},
+                           &(Oct_Colour) {0, 0, 0, 1}, scale, "Transform!");
+        oct_DrawText(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (text_size[0] / 2), 32 - (text_size[1] / 2)}, scale, "Transform!");
+    } else {
+        // Draw total time
+        Oct_Vec2 size;
+        oct_GetTextSize(kingdom, size, 1, "%.1fs", state.total_time);
+        oct_DrawTextColour(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (size[0] / 2) + 1, 22}, &(Oct_Colour) {0, 0, 0, 1},
+                           1, "%.1fs", state.total_time);
+        oct_DrawText(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (size[0] / 2), 21}, 1, "%.1fs", state.total_time);
+    }
+
     state.total_time += 1.0 / 30.0;
 
     // Spawn more enemies

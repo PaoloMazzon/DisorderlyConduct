@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <memory.h>
 #include <math.h>
+#include <oct/cJSON.h>
 
 ///////////////////////// ENUMS /////////////////////////
 typedef enum {
@@ -33,30 +34,11 @@ typedef enum {
 Oct_AssetBundle gBundle;
 Oct_Allocator gAllocator;
 Oct_Texture gBackBuffer;
+uint64_t gFrameCounter;
 
 ///////////////////////// CONSTANTS /////////////////////////
 
 // Default level layout
-const int32_t LEVEL_LAYOUT[] = {
-        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-        1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1,
-        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-        1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-        1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-        1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-};
 const int32_t LEVEL_WIDTH = 32;
 const int32_t LEVEL_HEIGHT = 18;
 
@@ -97,6 +79,7 @@ const float BOUNCE_PRESERVED_BOUNCE_WALL = 0.50; // how much velocity is preserv
 const float BOUNCE_PRESERVED = 0.20; // how much velocity is preserved when rebounding off walls
 const float GAMEPAD_DEADZONE = 0.25;
 const float PLAYER_ACCELERATION = 0.5;
+const float AI_ACCELERATION = 0.15;
 const float PLAYER_JUMP_SPEED = 7;
 const float SPEED_LIMIT = 12;
 
@@ -131,11 +114,13 @@ typedef struct Character_t {
     CharacterType type; // Type of opp
     uint64_t id;
     Oct_SpriteInstance sprite;
-    bool player_controlled; // True if this is the current player false means AI
+    bool alive;
     PhysicsObject physx;
     float hp; // Only applies to ai, players get 1 tapped bozo
     float lifespan; // Only applies to player, as he will EXPLODE when timeout (enemies fling off-screen)
-    bool alive;
+
+    float direction; // relevant for ai
+    bool player_controlled; // True if this is the current player false means AI
 } Character;
 
 typedef struct Particle_t {
@@ -239,7 +224,10 @@ CollisionEvent collision_at(Character *this_c, Projectile *this_p, float x, floa
     return e;
 }
 
-void process_physics(Character *this_c, Projectile *this_p, PhysicsObject *physx, float x_acceleration, float y_acceleration) {
+// Returns true if a horizontal collision was processed
+bool process_physics(Character *this_c, Projectile *this_p, PhysicsObject *physx, float x_acceleration, float y_acceleration) {
+    bool collision = false;
+
     // Add acceleration to velocity
     physx->x_vel = oct_Clamp(-SPEED_LIMIT, SPEED_LIMIT, physx->x_vel + x_acceleration);
     physx->y_vel = oct_Clamp(-SPEED_LIMIT, SPEED_LIMIT, physx->y_vel + y_acceleration);
@@ -254,7 +242,7 @@ void process_physics(Character *this_c, Projectile *this_p, PhysicsObject *physx
     }
     physx->y_vel += GRAVITY;
 
-    if (physx->noclip) return;
+    if (physx->noclip) return false;
 
     // Bouncy dogshit collisions
     CollisionEvent ce = collision_at(this_c, this_p, physx->x + physx->x_vel, physx->y, physx->bb_width, physx->bb_height);
@@ -268,6 +256,7 @@ void process_physics(Character *this_c, Projectile *this_p, PhysicsObject *physx
             physx->x_vel = physx->x_vel * (-BOUNCE_PRESERVED_BOUNCE_WALL);
         else
             physx->x_vel = physx->x_vel * (-BOUNCE_PRESERVED);
+        collision = true;
     }
     physx->x += physx->x_vel;
 
@@ -284,6 +273,7 @@ void process_physics(Character *this_c, Projectile *this_p, PhysicsObject *physx
             physx->y_vel = physx->y_vel * (-BOUNCE_PRESERVED);
     }
     physx->y += physx->y_vel;
+    return collision;
 }
 
 void draw_character(Character *character) {
@@ -322,9 +312,30 @@ void process_character(Character *character) {
         input = process_player(character);
     } else {
         // Get input from ai
+        input.x_acc = AI_ACCELERATION * character->direction;
+        const bool kinda_touching_ground = collision_at(character, null, character->physx.x, character->physx.y + 1, character->physx.bb_width, character->physx.bb_height).type != 0;
+
+        // Jumpers might jump every now and again
+        if (character->type == CHARACTER_TYPE_JUMPER) {
+            if (gFrameCounter % 5 == 0 && oct_Random(0, 1) > 0.5 && kinda_touching_ground) {
+                input.y_acc = -PLAYER_JUMP_SPEED;
+            }
+        }
     }
 
-    process_physics(character, null, &character->physx, input.x_acc, input.y_acc);
+    const bool x_coll = process_physics(character, null, &character->physx, input.x_acc, input.y_acc);
+
+    // Switch direction if the ai should change direction
+    if (!character->player_controlled) {
+        if (x_coll)
+            character->direction *= -1;
+        /*if (character->physx.x < 3 * 16) {
+            character->direction = -1;
+        } else if (character->physx.x > 29 * 16) {
+            character->direction = -1;
+        }*/
+    }
+
     draw_character(character);
 }
 
@@ -360,6 +371,27 @@ Character *add_character(Character *character) {
     return slot;
 }
 
+// Adds an ai (higher level version of add_character)
+Character *add_ai(CharacterType type) {
+    const bool spawn_left = oct_Random(0, 1) > 0.5;
+    float x_spawn;
+    if (spawn_left) {
+        x_spawn = 1.5 * 16;
+    } else {
+        x_spawn = 29.5 * 16;
+    }
+
+    return add_character(&(Character){
+            .type = type,
+            .hp = oct_Random(CHARACTER_HP_RANGES[type][0], CHARACTER_HP_RANGES[type][1]),
+            .physx = {
+                    .x = x_spawn,
+                    .y = -16,
+            },
+            .direction = spawn_left ? 1 : -1
+    });
+}
+
 ///////////////////////// GAME /////////////////////////
 void game_begin() {
     memset(&state, 0, sizeof(struct GameState_t));
@@ -368,10 +400,27 @@ void game_begin() {
             LEVEL_WIDTH, LEVEL_HEIGHT,
             (Oct_Vec2){16, 16});
 
-    // Copy tilemap
+    // Open json with level
+    uint32_t size;
+    uint8_t *data = oct_ReadFile("data/map1.tmj", gAllocator, &size);
+    cJSON *json = cJSON_ParseWithLength((void *)data, size);
+    if (!data || !json)
+        oct_Raise(OCT_STATUS_FILE_DOES_NOT_EXIST, true, "no level file womp womp");
+
+    // Find level data in the tiled json {"layers": [{"data": [0, 0, ...]}]}
+    cJSON *level_data = cJSON_GetObjectItem(
+            cJSON_GetArrayItem(
+                    cJSON_GetObjectItem(json, "layers"),
+                    0),
+            "data");
+
+    if (!level_data)
+        oct_Raise(OCT_STATUS_FILE_DOES_NOT_EXIST, true, "map json wrong :skull:");
+
     for (int y = 0; y < LEVEL_HEIGHT; y++) {
         for (int x = 0; x < LEVEL_WIDTH; x++) {
-            oct_SetTilemap(state.level_map, x, y, LEVEL_LAYOUT[(y * LEVEL_WIDTH) + x]);
+            int32_t item = (int)cJSON_GetNumberValue(cJSON_GetArrayItem(level_data, (y * LEVEL_WIDTH) + x));
+            oct_SetTilemap(state.level_map, x, y, item);
         }
     }
 
@@ -381,10 +430,13 @@ void game_begin() {
         .lifespan = 9999,
         .player_controlled = true,
         .physx = {
-                .x = 200,
-                .y = 20,
+                .x = 15.5 * 16,
+                .y = 11 * 16,
         }
     });
+
+    // Add test dude
+    add_ai(CHARACTER_TYPE_JUMPER);
 }
 
 GameStatus game_update() {
@@ -486,6 +538,7 @@ void *update(void *ptr) {
             0,
             (Oct_Vec2){0, 0});
 
+    gFrameCounter++;
     return null;
 }
 

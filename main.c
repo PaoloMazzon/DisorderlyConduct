@@ -84,6 +84,7 @@ const float AI_ACCELERATION = 0.15;
 const float PLAYER_JUMP_SPEED = 7;
 const float PARTICLES_GROUND_IMPACT_SPEED = 6;
 const float SPEED_LIMIT = 12;
+const float PLAYER_STARTING_LIFESPAN = 10; // seconds;
 
 ///////////////////////// STRUCTS /////////////////////////
 typedef struct PhysicsObject_t {
@@ -120,7 +121,6 @@ typedef struct Character_t {
     PhysicsObject physx;
     float max_hp; // Only applies to ai, players get 1 tapped bozo
     float hp;
-    float lifespan; // Only applies to player, as he will EXPLODE when timeout (enemies fling off-screen)
 
     float direction; // relevant for ai
     bool player_controlled; // True if this is the current player false means AI
@@ -187,6 +187,12 @@ typedef struct CreateParticlesJob_t {
 
 // LEAVE THIS AT THE BOTTOM
 typedef struct GameState_t {
+    // set when player gets a character
+    float lifespan;
+    float max_lifespan;
+    Character *player;
+    float total_time;
+
     Oct_Tilemap level_map;
     Character characters[MAX_CHARACTERS];
     Projectile projectiles[MAX_PROJECTILES];
@@ -581,15 +587,16 @@ void game_begin() {
     cJSON_Delete(json);
 
     // Add the player
-    add_character(&(Character){
+    state.player = add_character(&(Character){
         .type = CHARACTER_TYPE_JUMPER,
-        .lifespan = 9999,
         .player_controlled = true,
         .physx = {
                 .x = 15.5 * 16,
                 .y = 11 * 16,
         }
     });
+    state.lifespan = PLAYER_STARTING_LIFESPAN;
+    state.max_lifespan = PLAYER_STARTING_LIFESPAN;
 
     // Add test dude
     add_ai(CHARACTER_TYPE_JUMPER);
@@ -621,6 +628,42 @@ GameStatus game_update() {
         if (!state.particles[i].alive) continue;
         process_particle(&state.particles[i]);
     }
+
+    // draw player time left
+    const float percent = oct_Clamp(0, 1, state.lifespan / state.max_lifespan);
+    const float x = (GAME_WIDTH / 2) - (112 / 2);
+    const float y = 16;
+    oct_DrawTexture(
+            oct_GetAsset(gBundle, "textures/timebarempty.png"),
+            (Oct_Vec2){x, y}
+    );
+    Oct_DrawCommand cmd = {
+            .type = OCT_DRAW_COMMAND_TYPE_TEXTURE,
+            .interpolate = OCT_INTERPOLATE_ALL,
+            .id = 420,
+            .colour = {1, 1, 1, 1},
+            .Texture = {
+                    .texture = oct_GetAsset(gBundle, "textures/timebar.png"),
+                    .viewport = (Oct_Rectangle){
+                        .position = {0, 0},
+                        .size = {112 * percent, 32},
+                    },
+                    .position = {x, y},
+                    .scale = {1, 1},
+                    .origin = {0, 0},
+                    .rotation = 0,
+            }
+    };
+    oct_Draw(&cmd);
+    state.lifespan -= 1.0 / 30.0;
+
+    // Draw total time
+    const Oct_FontAtlas kingdom = oct_GetAsset(gBundle, "fnt_kingdom");
+    Oct_Vec2 size;
+    oct_GetTextSize(kingdom, size, 1, "%.1fs", state.total_time);
+    oct_DrawTextColour(kingdom, (Oct_Vec2){(GAME_WIDTH / 2) - (size[0] / 2) + 1, 21}, &(Oct_Colour){0, 0, 0, 1}, 1, "%.1fs", state.total_time);
+    oct_DrawText(kingdom, (Oct_Vec2){(GAME_WIDTH / 2) - (size[0] / 2), 20}, 1, "%.1fs", state.total_time);
+    state.total_time += 1.0 / 30.0;
 
     // just particles
     oct_WaitJobs();
@@ -730,7 +773,7 @@ int main(int argc, const char **argv) {
             .windowTitle = "Jam Game",
             .windowWidth = 1280,
             .windowHeight = 720,
-            .debug = true,
+            .debug = false,
     };
     oct_Init(&initInfo);
     return 0;

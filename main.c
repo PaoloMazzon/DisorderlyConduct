@@ -33,6 +33,7 @@ typedef enum {
 ///////////////////////// GLOBALS /////////////////////////
 Oct_AssetBundle gBundle;
 Oct_Allocator gAllocator;
+Oct_Allocator gFrameAllocator; // arena for frame-time allocations
 Oct_Texture gBackBuffer;
 uint64_t gFrameCounter;
 
@@ -70,7 +71,7 @@ const Oct_Vec2 CHARACTER_HP_RANGES[] = {
 
 #define MAX_CHARACTERS 100
 #define MAX_PROJECTILES 100
-#define MAX_PARTICLES 100
+#define MAX_PARTICLES 1000
 #define MAX_PHYSICS_OBJECTS (MAX_CHARACTERS + MAX_PROJECTILES) // particles noclip
 const float GROUND_FRICTION = 0.05;
 const float AIR_FRICTION = 0.01;
@@ -81,6 +82,7 @@ const float GAMEPAD_DEADZONE = 0.25;
 const float PLAYER_ACCELERATION = 0.5;
 const float AI_ACCELERATION = 0.15;
 const float PLAYER_JUMP_SPEED = 7;
+const float PARTICLES_GROUND_IMPACT_SPEED = 6;
 const float SPEED_LIMIT = 12;
 
 ///////////////////////// STRUCTS /////////////////////////
@@ -116,7 +118,8 @@ typedef struct Character_t {
     Oct_SpriteInstance sprite;
     bool alive;
     PhysicsObject physx;
-    float hp; // Only applies to ai, players get 1 tapped bozo
+    float max_hp; // Only applies to ai, players get 1 tapped bozo
+    float hp;
     float lifespan; // Only applies to player, as he will EXPLODE when timeout (enemies fling off-screen)
 
     float direction; // relevant for ai
@@ -127,11 +130,13 @@ typedef struct Particle_t {
     bool sprite_based; // if true the sprite and frame is used
     PhysicsObject physx;
     float lifetime; // in seconds
+    float total_lifetime;
+    uint64_t id;
     _Atomic bool alive;
     union {
         struct {
             Oct_Sprite sprite;
-            int32_t frame;
+            Oct_SpriteInstance instance;
         };
         Oct_Texture texture;
     };
@@ -162,6 +167,24 @@ typedef struct CollisionEvent_t {
     };
 } CollisionEvent;
 
+typedef struct ParticleJob_t {
+    int32_t index;
+    int32_t count;
+    Particle *list;
+} ParticleJob;
+
+typedef struct CreateParticlesJob_t {
+    int32_t count;
+    float x;
+    float y;
+    float x_vel;
+    float y_vel;
+    float variation; // 0 is none
+    Oct_Texture tex;
+    Oct_Sprite spr;
+    float lifetime; // seconds
+} CreateParticlesJob;
+
 // LEAVE THIS AT THE BOTTOM
 typedef struct GameState_t {
     Oct_Tilemap level_map;
@@ -173,6 +196,39 @@ typedef struct GameState_t {
 GameState state;
 
 ///////////////////////// HELPERS /////////////////////////
+void create_particles_job(CreateParticlesJob *data) {
+    CreateParticlesJob *job = data;
+    for (int i = 0; i < job->count; i++) {
+        // find a spot in the list for this particle
+        int32_t spot = -1;
+        for (int j = 0; j < MAX_PARTICLES; j++) {
+            if (!state.particles[j].alive) {
+                spot = j;
+                break;
+            }
+        }
+
+        if (spot >= 0) {
+            Particle *p = &state.particles[spot];
+            p->sprite_based = job->spr != OCT_NO_ASSET;
+            p->physx = (PhysicsObject){
+                    .x = job->x,
+                    .y = job->y,
+                    .x_vel = job->x_vel + oct_Random(-job->variation, job->variation),
+                    .y_vel = job->y_vel + oct_Random(-job->variation, job->variation),
+                    .noclip = true
+            };
+            p->lifetime = job->lifetime;
+            p->total_lifetime = job->lifetime;
+            p->sprite = job->spr;
+            oct_InitSpriteInstance(&p->instance, job->spr, true);
+            p->texture = job->tex;
+            p->id = 10000000 + spot;
+            p->alive = true;
+        }
+    }
+}
+
 static inline float sign(float x) {
     return x > 0 ? 1 : (x < 0 ? -1 : 0);
 }
@@ -242,7 +298,11 @@ bool process_physics(Character *this_c, Projectile *this_p, PhysicsObject *physx
     }
     physx->y_vel += GRAVITY;
 
-    if (physx->noclip) return false;
+    if (physx->noclip) {
+        physx->x += physx->x_vel;
+        physx->y += physx->y_vel;
+        return false;
+    }
 
     // Bouncy dogshit collisions
     CollisionEvent ce = collision_at(this_c, this_p, physx->x + physx->x_vel, physx->y, physx->bb_width, physx->bb_height);
@@ -266,6 +326,21 @@ bool process_physics(Character *this_c, Projectile *this_p, PhysicsObject *physx
         while (!collision_at(this_c, this_p, physx->x, physx->y + (sign(physx->y_vel) * 0.1), physx->bb_width, physx->bb_height).type)
             physx->y += (sign(physx->y_vel) * 0.1);
 
+        // Particles cuz you hit the ground hard
+        if (physx->y_vel > PARTICLES_GROUND_IMPACT_SPEED) {
+            create_particles_job(&(CreateParticlesJob){
+                .variation = 1,
+                .y_vel = -2,
+                .x_vel = 0,
+                .tex = oct_GetAsset(gBundle, "textures/garbageparticle.png"),
+                .spr = OCT_NO_ASSET,
+                .x = physx->x + (physx->bb_width / 2),
+                .y = physx->y + physx->bb_height,
+                .count = 10,
+                .lifetime = 1
+            });
+        }
+
         // Bounce off the wall slightly
         if (ce.type == COLLISION_EVENT_TYPE_BOUNCY_WALL)
             physx->y_vel = physx->y_vel * (-BOUNCE_PRESERVED_BOUNCE_WALL);
@@ -285,6 +360,30 @@ void draw_character(Character *character) {
                 (Oct_Vec2) {character->physx.x, character->physx.y}
                 );
     } // TODO: The rest of these
+
+    // Draw healthbar
+    const float percent = character->hp / character->max_hp;
+    const float x = character->physx.x;
+    const float y = character->physx.y - 4;
+    /* TODO: This is fucked for some reason
+    oct_DrawRectangleIntColour(
+            OCT_INTERPOLATE_ALL, character->id + 1,
+            &(Oct_Colour){0, 0, 0, 1},
+            &(Oct_Rectangle){
+                    .size = {character->physx.bb_width, 2},
+                    .position = {x, y}
+            },
+            true,
+            1);
+    oct_DrawRectangleIntColour(
+            OCT_INTERPOLATE_ALL, character->id + 1,
+            &(Oct_Colour){59.0 / 255.0, 148.0 / 255.0, 45.0 / 255.0, 1},
+            &(Oct_Rectangle){
+                    .size = {character->physx.bb_width * percent, 2},
+                    .position = {x, y}
+            },
+            true,
+            1);*/
 }
 
 InputProfile process_player(Character *character) {
@@ -340,8 +439,63 @@ void process_character(Character *character) {
 }
 
 void process_particle(Particle *particle) {
-    // todo: this
+    process_physics(null, null, &particle->physx, 0, 0);
+    const float percent = particle->lifetime / particle->total_lifetime;
+
+    // draw
+    if (particle->sprite_based) {
+        oct_DrawSpriteIntColourExt(
+                OCT_INTERPOLATE_ALL, particle->id,
+                particle->sprite, &particle->instance,
+                &(Oct_Colour){1, 1, 1, percent},
+                (Oct_Vec2){particle->physx.x, particle->physx.y},
+                (Oct_Vec2){percent, percent},
+                0, (Oct_Vec2){0, 0});
+    } else {
+        oct_DrawTextureIntColourExt(
+                OCT_INTERPOLATE_ALL, particle->id,
+                particle->texture,
+                &(Oct_Colour){1, 1, 1, percent},
+                (Oct_Vec2){particle->physx.x, particle->physx.y},
+                (Oct_Vec2){percent, percent},
+                0, (Oct_Vec2){0, 0});
+    }
+
+    // kill
+    particle->lifetime -= 1.0/30.0;
+    if (particle->lifetime <= 0) {
+        particle->alive = false;
+    }
 }
+
+/*
+void particle_job(void *data) {
+    ParticleJob *particle_job = data;
+
+    for (int i = particle_job->index; i < particle_job->count + particle_job->index; i++) {
+        if (!particle_job->list[i].alive) return;
+        process_particle(&particle_job->list[i]);
+    }
+}
+
+void queue_particles_jobs(Oct_Allocator allocator) {
+    const int particle_job_size = 25;
+    for (int i = 0; i < MAX_PARTICLES / particle_job_size; i++) {
+        ParticleJob job = {
+                .list = state.particles,
+                .index = i * particle_job_size,
+                .count = particle_job_size
+        };
+        void *dest = oct_Malloc(allocator, sizeof(ParticleJob));
+        memcpy(dest, &job, sizeof(ParticleJob));
+        oct_QueueJob(particle_job, dest);
+    }
+}*/
+
+/*
+void create_particles(CreateParticlesJob *job) {
+    oct_QueueJob(create_particles_job, job);
+}*/
 
 void process_projectile(Projectile *projectile) {
     // todo: this
@@ -356,13 +510,14 @@ Character *add_character(Character *character) {
             slot = &state.characters[i];
             memcpy(slot, character, sizeof(struct Character_t));
             slot->alive = true;
+            slot->hp = slot->max_hp;
 
             // Handle sprite instance & bounding box
             if (slot->type == CHARACTER_TYPE_JUMPER) {
                 oct_InitSpriteInstance(&slot->sprite, oct_GetAsset(gBundle, "sprites/jumper.json"), true);
                 slot->physx.bb_width = 12;
                 slot->physx.bb_height = 12;
-                slot->id = 10000 + i;
+                slot->id = 10000 + i * 2;
             }  // TODO: The rest of these
 
             break;
@@ -383,7 +538,7 @@ Character *add_ai(CharacterType type) {
 
     return add_character(&(Character){
             .type = type,
-            .hp = oct_Random(CHARACTER_HP_RANGES[type][0], CHARACTER_HP_RANGES[type][1]),
+            .max_hp = oct_Random(CHARACTER_HP_RANGES[type][0], CHARACTER_HP_RANGES[type][1]),
             .physx = {
                     .x = x_spawn,
                     .y = -16,
@@ -423,6 +578,7 @@ void game_begin() {
             oct_SetTilemap(state.level_map, x, y, item);
         }
     }
+    cJSON_Delete(json);
 
     // Add the player
     add_character(&(Character){
@@ -447,6 +603,9 @@ GameStatus game_update() {
     if (oct_KeyPressed(OCT_KEY_L))
         add_ai(CHARACTER_TYPE_JUMPER);
 
+    // this is causing major fuckups that im not dealing with
+    //queue_particles_jobs(gFrameAllocator);
+
     for (int i = 0; i < MAX_CHARACTERS; i++) {
         if (!state.characters[i].alive) continue;
         process_character(&state.characters[i]);
@@ -457,10 +616,14 @@ GameStatus game_update() {
         if (!state.projectiles[i].alive) continue;
         process_projectile(&state.projectiles[i]);
     }
+
     for (int i = 0; i < MAX_PARTICLES; i++) {
         if (!state.particles[i].alive) continue;
         process_particle(&state.particles[i]);
     }
+
+    // just particles
+    oct_WaitJobs();
 
     return GAME_STATUS_PLAY_GAME;
 }
@@ -487,6 +650,7 @@ void menu_end() {
 void *startup() {
     gBundle = oct_LoadAssetBundle("data");
     gAllocator = oct_CreateHeapAllocator();
+    gFrameAllocator = oct_CreateArenaAllocator(4096);
 
     // Backbuffer
     gBackBuffer = oct_CreateSurface((Oct_Vec2){GAME_WIDTH, GAME_HEIGHT});
@@ -495,7 +659,6 @@ void *startup() {
 
     // oct shit
     oct_GamepadSetAxisDeadzone(GAMEPAD_DEADZONE);
-    oct_SetFullscreen(true);
 
     return null;
 }
@@ -543,12 +706,14 @@ void *update(void *ptr) {
             (Oct_Vec2){0, 0});
 
     gFrameCounter++;
+    oct_ResetAllocator(gFrameAllocator);
     return null;
 }
 
 // Called once when the engine is about to be deinitialized
 void shutdown(void *ptr) {
     oct_FreeAllocator(gAllocator);
+    oct_FreeAllocator(gFrameAllocator);
     oct_FreeAssetBundle(gBundle);
 }
 

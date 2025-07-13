@@ -59,6 +59,17 @@ const float CHARACTER_TYPE_LIFESPANS[] = {
         3, // CHARACTER_TYPE_LASER,
 };
 
+
+const float ACCELERATION_VALUES[] = {
+        0, // CHARACTER_TYPE_INVALID,
+        0.12, // CHARACTER_TYPE_JUMPER,
+        0.08, // CHARACTER_TYPE_X_SHOOTER,
+        0.08, // CHARACTER_TYPE_Y_SHOOTER,
+        0.08, // CHARACTER_TYPE_XY_SHOOTER,
+        0.2, // CHARACTER_TYPE_SWORDSMITH,
+        0.02, // CHARACTER_TYPE_LASER,
+};
+
 #define MAX_CHARACTERS 100
 #define MAX_PROJECTILES 100
 #define MAX_PARTICLES 1000
@@ -69,8 +80,6 @@ const float GRAVITY = 0.5;
 const float BOUNCE_PRESERVED_BOUNCE_WALL = 0.50; // how much velocity is preserved when rebounding off walls
 const float BOUNCE_PRESERVED = 0.20; // how much velocity is preserved when rebounding off walls
 const float GAMEPAD_DEADZONE = 0.25;
-const float PLAYER_ACCELERATION = 0.5;
-const float AI_ACCELERATION = 0.15;
 const float PLAYER_JUMP_SPEED = 7;
 const float PARTICLES_GROUND_IMPACT_SPEED = 6;
 const float SPEED_LIMIT = 12;
@@ -78,6 +87,7 @@ const float PLAYER_STARTING_LIFESPAN = 30; // seconds;
 const int32_t START_REQ_KILLS = 3;
 const float ENEMY_FLING_SPEED = 5;
 const int32_t PLAYER_I_FRAMES = 30;
+const float PLAYER_SPEED_FACTOR = 3; // how much fast the player is than the ai in the same types
 
 ///////////////////////// STRUCTS /////////////////////////
 typedef struct PhysicsObject_t {
@@ -112,6 +122,8 @@ typedef struct Character_t {
     Oct_SpriteInstance sprite;
     bool alive;
     PhysicsObject physx;
+    float facing; // direction facing, -1 or 1
+    float shown_facing; // for a cool visual effect
 
     float direction; // relevant for ai
     bool player_controlled; // True if this is the current player false means AI
@@ -251,7 +263,7 @@ Oct_Sprite character_type_sprite(Character *character) {
     if (character->player_controlled) {
         switch (character->type) {
             case CHARACTER_TYPE_JUMPER: return oct_GetAsset(gBundle, "sprites/playerjumper.json");
-            case CHARACTER_TYPE_X_SHOOTER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
+            case CHARACTER_TYPE_X_SHOOTER: return oct_GetAsset(gBundle, "sprites/shooter.json");
             case CHARACTER_TYPE_Y_SHOOTER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
             case CHARACTER_TYPE_XY_SHOOTER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
             case CHARACTER_TYPE_SWORDSMITH: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
@@ -262,7 +274,7 @@ Oct_Sprite character_type_sprite(Character *character) {
 
     switch (character->type) {
         case CHARACTER_TYPE_JUMPER: return oct_GetAsset(gBundle, "sprites/jumper.json");
-        case CHARACTER_TYPE_X_SHOOTER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
+        case CHARACTER_TYPE_X_SHOOTER: return oct_GetAsset(gBundle, "sprites/shooter.json");
         case CHARACTER_TYPE_Y_SHOOTER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
         case CHARACTER_TYPE_XY_SHOOTER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
         case CHARACTER_TYPE_SWORDSMITH: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
@@ -423,12 +435,34 @@ void draw_character(Character *character) {
     }
 
     if (character->type == CHARACTER_TYPE_JUMPER) {
-        oct_DrawSpriteIntColour(
+        const float x = character->facing == 1 ? character->physx.x : (character->physx.x + character->physx.bb_width);
+        character->shown_facing += (character->facing - character->shown_facing) * 0.6;
+        oct_DrawSpriteIntColourExt(
                 OCT_INTERPOLATE_ALL, character->id,
                 character_type_sprite(character),
                 &character->sprite,
                 &c,
-                (Oct_Vec2) {character->physx.x, character->physx.y});
+                (Oct_Vec2) {x, character->physx.y},
+                (Oct_Vec2){character->shown_facing, 1},
+                0, (Oct_Vec2){0, 0});
+    }  else if (character->type == CHARACTER_TYPE_X_SHOOTER) {
+        const float x = character->facing == 1 ? character->physx.x : (character->physx.x + character->physx.bb_width);
+        character->shown_facing += (character->facing - character->shown_facing) * 0.6;
+        oct_DrawSpriteIntColourExt(
+                OCT_INTERPOLATE_ALL, character->id,
+                character_type_sprite(character),
+                &character->sprite,
+                &c,
+                (Oct_Vec2) {x, character->physx.y},
+                (Oct_Vec2){character->shown_facing, 1},
+                0, (Oct_Vec2){0, 0});
+        oct_DrawTextureIntColourExt(
+                OCT_INTERPOLATE_ALL, character->id + 3,
+                oct_GetAsset(gBundle, "textures/gun.png"),
+                &c,
+                (Oct_Vec2) {x + 12, character->physx.y},
+                (Oct_Vec2){character->shown_facing, 1},
+                0, (Oct_Vec2){0, 0});
     } // TODO: The rest of these
 }
 
@@ -437,10 +471,10 @@ InputProfile process_player(Character *character) {
     state.player_iframes -= 1;
     if (oct_KeyDown(OCT_KEY_LEFT) || oct_GamepadButtonDown(0, OCT_GAMEPAD_BUTTON_DPAD_LEFT) ||
         oct_GamepadLeftAxisX(0) < 0) {
-        input.x_acc = -PLAYER_ACCELERATION;
+        input.x_acc = -(ACCELERATION_VALUES[character->type] * PLAYER_SPEED_FACTOR);
     } else if (oct_KeyDown(OCT_KEY_RIGHT) || oct_GamepadButtonDown(0, OCT_GAMEPAD_BUTTON_DPAD_RIGHT) ||
                oct_GamepadLeftAxisX(0) > 0) {
-        input.x_acc = PLAYER_ACCELERATION;
+        input.x_acc = (ACCELERATION_VALUES[character->type] * PLAYER_SPEED_FACTOR);
     }
     const bool kinda_touching_ground = collision_at(character, null, character->physx.x, character->physx.y + 1, character->physx.bb_width, character->physx.bb_height).type;
 
@@ -572,7 +606,7 @@ void process_character(Character *character) {
         input = process_player(character);
     } else {
         // Get input from ai
-        input.x_acc = AI_ACCELERATION * character->direction;
+        input.x_acc = ACCELERATION_VALUES[character->type] * character->direction;
         const bool kinda_touching_ground = collision_at(character, null, character->physx.x, character->physx.y + 1, character->physx.bb_width, character->physx.bb_height).type != 0;
 
         // Jumpers might jump every now and again
@@ -583,6 +617,9 @@ void process_character(Character *character) {
         }
     }
 
+    if (input.x_acc != 0) {
+        character->facing = sign(input.x_acc);
+    }
     const bool x_coll = process_physics(character, null, &character->physx, input.x_acc, input.y_acc);
 
     // Type specific stuff
@@ -719,7 +756,9 @@ Character *add_character(Character *character) {
                 oct_InitSpriteInstance(&slot->sprite, character_type_sprite(slot), true);
                 slot->physx.bb_width = 12;
                 slot->physx.bb_height = 12;
-                slot->id = 10000 + i * 2;
+                slot->facing = 1;
+                slot->id = gParticleIDs;
+                gParticleIDs += 10;
             }  // TODO: The rest of these
 
             break;
@@ -843,7 +882,7 @@ GameStatus game_update() {
 
     // DEBUG
     if (oct_KeyPressed(OCT_KEY_L))
-        add_ai(CHARACTER_TYPE_JUMPER);
+        add_ai(CHARACTER_TYPE_X_SHOOTER);
 
     // this is causing major fuckups that im not dealing with
     //queue_particles_jobs(gFrameAllocator);

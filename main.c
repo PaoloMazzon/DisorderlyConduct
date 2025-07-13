@@ -76,6 +76,8 @@ const float PARTICLES_GROUND_IMPACT_SPEED = 6;
 const float SPEED_LIMIT = 12;
 const float PLAYER_STARTING_LIFESPAN = 30; // seconds;
 const int32_t START_REQ_KILLS = 3;
+const float ENEMY_FLING_SPEED = 5;
+const int32_t PLAYER_I_FRAMES = 30;
 
 ///////////////////////// STRUCTS /////////////////////////
 typedef struct PhysicsObject_t {
@@ -134,8 +136,10 @@ typedef struct Particle_t {
 typedef struct Projectile_t {
     PhysicsObject physx;
     float lifetime; // in seconds
+    float max_lifetime;
     Oct_Texture tex;
-    float damage; // only relevant for enemies
+    uint64_t id;
+    bool player_bullet; // whether the player shot it
     _Atomic bool alive;
 } Projectile;
 
@@ -184,6 +188,7 @@ typedef struct GameState_t {
     int req_kills; // for transforming
     int current_kills;
     float displayed_kills; // for lerping a nice val
+    int32_t player_iframes; // after getting hit
 
     Oct_SpriteInstance fire;
 
@@ -198,6 +203,8 @@ GameState state;
 #define NEAR_LEVEL_UP (state.req_kills - 1 == state.current_kills)
 
 ///////////////////////// HELPERS /////////////////////////
+Projectile *create_projectile(bool player_shot, Oct_Texture tex, float lifetime, float x, float y, float x_speed, float y_speed);
+
 void create_particles_job(CreateParticlesJob *data) {
     CreateParticlesJob *job = data;
     for (int i = 0; i < job->count; i++) {
@@ -333,7 +340,12 @@ bool process_physics(Character *this_c, Projectile *this_p, PhysicsObject *physx
 
     // Bouncy dogshit collisions
     CollisionEvent ce = collision_at(this_c, this_p, physx->x + physx->x_vel, physx->y, physx->bb_width, physx->bb_height);
-    if (ce.type) {
+    bool counts_as_collision = ce.type;
+    if ((this_p && ce.type == COLLISION_EVENT_TYPE_CHARACTER) || (this_c && ce.type == COLLISION_EVENT_TYPE_PROJECTILE)) {
+        counts_as_collision = false;
+    }
+
+    if (counts_as_collision) {
         // Get close to the wall
         while (!collision_at(this_c, this_p, physx->x + (sign(physx->x_vel) * 0.1), physx->y, physx->bb_width, physx->bb_height).type)
             physx->x += (sign(physx->x_vel) * 0.1);
@@ -356,7 +368,11 @@ bool process_physics(Character *this_c, Projectile *this_p, PhysicsObject *physx
     physx->x += physx->x_vel;
 
     ce = collision_at(this_c, this_p, physx->x, physx->y + physx->y_vel, physx->bb_width, physx->bb_height);
-    if (ce.type) {
+    counts_as_collision = ce.type;
+    if ((this_p && ce.type == COLLISION_EVENT_TYPE_CHARACTER) || (this_c && ce.type == COLLISION_EVENT_TYPE_PROJECTILE)) {
+        counts_as_collision = false;
+    }
+    if (counts_as_collision) {
         // Get close to the wall
         while (!collision_at(this_c, this_p, physx->x, physx->y + (sign(physx->y_vel) * 0.1), physx->bb_width, physx->bb_height).type)
             physx->y += (sign(physx->y_vel) * 0.1);
@@ -391,6 +407,12 @@ bool process_physics(Character *this_c, Projectile *this_p, PhysicsObject *physx
 }
 
 void draw_character(Character *character) {
+    // for iframes
+    Oct_Colour c = {1, 1, 1, 1};
+    if (character->player_controlled && state.player_iframes > 0 && (state.player_iframes % 2 == 0)) {
+        c.a = 0;
+    }
+
     // draw fire effect when time to level up or whatever its called
     if (character->player_controlled && NEAR_LEVEL_UP) {
         // 49, 95
@@ -401,17 +423,18 @@ void draw_character(Character *character) {
     }
 
     if (character->type == CHARACTER_TYPE_JUMPER) {
-        oct_DrawSpriteInt(
+        oct_DrawSpriteIntColour(
                 OCT_INTERPOLATE_ALL, character->id,
                 character_type_sprite(character),
                 &character->sprite,
-                (Oct_Vec2) {character->physx.x, character->physx.y}
-                );
+                &c,
+                (Oct_Vec2) {character->physx.x, character->physx.y});
     } // TODO: The rest of these
 }
 
 InputProfile process_player(Character *character) {
     InputProfile input = {0};
+    state.player_iframes -= 1;
     if (oct_KeyDown(OCT_KEY_LEFT) || oct_GamepadButtonDown(0, OCT_GAMEPAD_BUTTON_DPAD_LEFT) ||
         oct_GamepadLeftAxisX(0) < 0) {
         input.x_acc = -PLAYER_ACCELERATION;
@@ -432,13 +455,13 @@ InputProfile process_player(Character *character) {
     return input;
 }
 
-void kill_character(Character *character, bool dramatic);
+void kill_character(bool player_is_killer, Character *character, bool dramatic);
 
 // transforms the player into this dude
 void take_body(Character *character) {
     // reset kills and show a nice particle effect
     state.req_kills++;
-    state.current_kills = -1;
+    state.current_kills = 0;
     create_particles_job(&(CreateParticlesJob){
             .lifetime = 3,
             .count = 10,
@@ -465,10 +488,10 @@ void take_body(Character *character) {
 
     // kill old player
     player->player_controlled = false;
-    kill_character(player, true);
+    kill_character(false, player, true);
 }
 
-void kill_character(Character *character, bool dramatic) {
+void kill_character(bool player_is_the_killer, Character *character, bool dramatic) {
     if (!character->player_controlled) {
         character->alive = false;
         create_particles_job(&(CreateParticlesJob){
@@ -481,7 +504,6 @@ void kill_character(Character *character, bool dramatic) {
             .y = character->physx.y,
             .y_vel = -2
         });
-        state.current_kills += 1;
 
         // small sound
         oct_PlaySound(
@@ -500,11 +522,46 @@ void kill_character(Character *character, bool dramatic) {
                 .y_vel = -2
         });
 
-        if (state.current_kills >= state.req_kills) {
-            take_body(character);
+        if (player_is_the_killer) {
+            state.current_kills += 1;
+            if (state.current_kills >= state.req_kills) {
+                take_body(character);
+            }
         }
-    } else {
-        // todo: explosion particle
+    } else if (state.player_iframes <= 0) {
+        state.player_iframes = PLAYER_I_FRAMES;
+        if (state.lifespan <= 0) {
+            // TODO: death ssound effect
+
+            create_particles_job(&(CreateParticlesJob) {
+                    .lifetime = 0.8,
+                    .count = 1,
+                    .variation = 0,
+                    .spr = oct_GetAsset(gBundle, "sprites/explosion.json"),
+                    .tex = OCT_NO_ASSET,
+                    .x = character->physx.x + (character->physx.bb_width / 2) - 20,
+                    .y = character->physx.y + (character->physx.bb_height / 2) - 20,
+                    .y_vel = -2
+            });
+        } else {
+            state.lifespan *= 0.75;
+
+            oct_PlaySound(
+                    oct_GetAsset(gBundle, "sounds/jumpenemy.wav"),
+                    (Oct_Vec2) {1, 1},
+                    false);
+
+            create_particles_job(&(CreateParticlesJob){
+                    .lifetime = 3,
+                    .count = 8,
+                    .variation = 1,
+                    .spr = OCT_NO_ASSET,
+                    .tex = oct_GetAsset(gBundle, "textures/blood.png"),
+                    .x = character->physx.x + (character->physx.bb_width / 2),
+                    .y = character->physx.y + (character->physx.bb_height / 2),
+                    .y_vel = -2
+            });
+        }
     }
 }
 
@@ -528,7 +585,22 @@ void process_character(Character *character) {
 
     const bool x_coll = process_physics(character, null, &character->physx, input.x_acc, input.y_acc);
 
-    // Switch direction if the ai should change direction
+    // Type specific stuff
+    if (character->type == CHARACTER_TYPE_JUMPER) {
+        // Jump on enemy head should kill them
+        const CollisionEvent y_collision = collision_at(character, null, character->physx.x, character->physx.y + 2, character->physx.bb_width, character->physx.bb_height);
+        if (y_collision.type == COLLISION_EVENT_TYPE_CHARACTER) {
+            kill_character(character->player_controlled, y_collision.character, false);
+
+            // fly away if not the player
+            if (!character->player_controlled) {
+                character->physx.y_vel -= PLAYER_JUMP_SPEED;
+                character->physx.x_vel = oct_Random(-ENEMY_FLING_SPEED, ENEMY_FLING_SPEED);
+            }
+        }
+    }
+
+    // ai controls post physics
     if (!character->player_controlled) {
         if (x_coll)
             character->direction *= -1;
@@ -538,15 +610,7 @@ void process_character(Character *character) {
             character->alive = false;
         }
     } else {
-        // Handle player specific events
-        if (character->type == CHARACTER_TYPE_JUMPER) {
-            // Jump on enemy head should kill them
-            const CollisionEvent y_collision = collision_at(character, null, character->physx.x, character->physx.y + 2, character->physx.bb_width, character->physx.bb_height);
-            if (y_collision.type == COLLISION_EVENT_TYPE_CHARACTER) {
-                kill_character(y_collision.character, false);
-                // todo: other effects later?
-            }
-        }
+        // player specific stuff
     }
 
     draw_character(character);
@@ -612,7 +676,32 @@ void create_particles(CreateParticlesJob *job) {
 }*/
 
 void process_projectile(Projectile *projectile) {
-    // todo: this
+    process_physics(null, projectile, &projectile->physx, 0, 0);
+
+    // hit opps
+    CollisionEvent event = collision_at(
+            null, projectile,
+            projectile->physx.x,
+            projectile->physx.y,
+            projectile->physx.bb_width,
+            projectile->physx.bb_height);
+    if (event.type == COLLISION_EVENT_TYPE_CHARACTER) {
+        kill_character(projectile->player_bullet, event.character, false);
+        projectile->alive = false;
+    }
+
+    // lifetime
+    projectile->lifetime -= 1.0 / 30.0;
+    if (projectile->lifetime <= 0) {
+        projectile->alive = false;
+    }
+
+    // draw
+    oct_DrawTextureInt(
+            OCT_INTERPOLATE_ALL, projectile->id,
+            projectile->tex,
+            (Oct_Vec2){projectile->physx.x, projectile->physx.y}
+            );
 }
 
 // copies a character into an available character slot and returns the character in the slot or
@@ -657,6 +746,44 @@ Character *add_ai(CharacterType type) {
             },
             .direction = spawn_left ? 1 : -1
     });
+}
+
+Projectile *create_projectile(bool player_shot, Oct_Texture tex, float lifetime, float x, float y, float x_speed, float y_speed) {
+    Projectile *slot = null;
+    for (int i = 0; i < MAX_CHARACTERS; i++) {
+        if (!state.projectiles[i].alive) {
+            slot = &state.projectiles[i];
+            slot->alive = true;
+
+            slot->physx.bb_width = oct_TextureWidth(tex);
+            slot->physx.bb_height = oct_TextureHeight(tex);
+            slot->physx.x = x - (slot->physx.bb_width / 2);
+            slot->physx.y = y - (slot->physx.bb_height / 2);
+            slot->physx.x_vel = x_speed;
+            slot->physx.y_vel = y_speed;
+            slot->lifetime = lifetime;
+            slot->max_lifetime = lifetime;
+            slot->tex = tex;
+            slot->player_bullet = player_shot;
+            slot->id = gParticleIDs++;
+
+            // we wont make projectiles in spots where they are already colliding
+            const CollisionEvent event = collision_at(
+                    null,
+                    slot,
+                    slot->physx.x,
+                    slot->physx.y,
+                    slot->physx.bb_width,
+                    slot->physx.bb_height);
+            if (event.type != COLLISION_EVENT_TYPE_NO_COLLISION) {
+                slot->alive = false;
+                slot = null;
+            }
+
+            break;
+        }
+    }
+    return slot;
 }
 
 ///////////////////////// GAME /////////////////////////
@@ -927,7 +1054,7 @@ int main(int argc, const char **argv) {
             .windowTitle = "Jam Game",
             .windowWidth = 1280,
             .windowHeight = 720,
-            .debug = false,
+            .debug = true,
     };
     oct_Init(&initInfo);
     return 0;

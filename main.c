@@ -329,11 +329,11 @@ void process_character(Character *character) {
     if (!character->player_controlled) {
         if (x_coll)
             character->direction *= -1;
-        /*if (character->physx.x < 3 * 16) {
-            character->direction = -1;
-        } else if (character->physx.x > 29 * 16) {
-            character->direction = -1;
-        }*/
+
+        // If they fall out the map they die :skull: -- player will handle their own deaths
+        if (character->physx.y > GAME_HEIGHT) {
+            character->alive = false;
+        }
     }
 
     draw_character(character);
@@ -442,6 +442,10 @@ void game_begin() {
 GameStatus game_update() {
 
     oct_TilemapDraw(state.level_map);
+
+    // DEBUG
+    if (oct_KeyPressed(OCT_KEY_L))
+        add_ai(CHARACTER_TYPE_JUMPER);
 
     for (int i = 0; i < MAX_CHARACTERS; i++) {
         if (!state.characters[i].alive) continue;

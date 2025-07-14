@@ -128,7 +128,7 @@ const float GAMEPAD_DEADZONE = 0.25;
 const float PLAYER_JUMP_SPEED = 7;
 const float PARTICLES_GROUND_IMPACT_SPEED = 6;
 const float SPEED_LIMIT = 12;
-const float PLAYER_STARTING_LIFESPAN = 30; // seconds;
+const float PLAYER_STARTING_LIFESPAN = 1; // seconds;
 const int32_t START_REQ_KILLS = 3;
 const float ENEMY_FLING_SPEED = 5;
 const int32_t PLAYER_I_FRAMES = 30;
@@ -267,6 +267,10 @@ typedef struct GameState_t {
     int current_kills;
     float displayed_kills; // for lerping a nice val
     int32_t player_iframes; // after getting hit
+    bool player_died;
+    float player_die_time;
+    bool banner_dropped; // animation
+    bool got_highscore;
 
     Oct_SpriteInstance fire;
     float score; // literally just 1 per frame
@@ -283,6 +287,8 @@ GameState state;
 
 ///////////////////////// HELPERS /////////////////////////
 Projectile *create_projectile(bool player_shot, Oct_Texture tex, float lifetime, float x, float y, float x_speed, float y_speed);
+Save parse_save();
+void save_game(Save *save);
 
 void create_particles_job(CreateParticlesJob *data) {
     CreateParticlesJob *job = data;
@@ -587,6 +593,8 @@ void shoot_y_bullet(Character *character);
 void shoot_xy_bullet(Character *character);
 InputProfile process_player(Character *character) {
     InputProfile input = {0};
+
+    if (state.player_died) return input;
     state.player_iframes -= 1;
     if (oct_KeyDown(OCT_KEY_LEFT) || oct_GamepadButtonDown(0, OCT_GAMEPAD_BUTTON_DPAD_LEFT) ||
         oct_GamepadLeftAxisX(0) < 0) {
@@ -715,6 +723,17 @@ void shoot_xy_bullet(Character *character) {
     character->physx.x_vel -= XY_SHOOTER_RECOIL * character->facing;
 }
 
+// checks if the user got a highscore and records it if so
+void check_highscore() {
+    Save save = parse_save();
+    if (save.highscore < state.score) {
+        state.got_highscore = true;
+        save.highscore = state.score;
+        save_game(&save);
+        // todo - possible global leaderboard
+    }
+}
+
 void kill_character(bool player_is_the_killer, Character *character, bool dramatic) {
     if (!character->player_controlled) {
         character->alive = false;
@@ -752,10 +771,13 @@ void kill_character(bool player_is_the_killer, Character *character, bool dramat
                 take_body(character);
             }
         }
-    } else if (state.player_iframes <= 0) {
+    } else if (state.player_iframes <= 0 && !state.player_died) {
         state.player_iframes = PLAYER_I_FRAMES;
         if (state.lifespan <= 0) {
-            // TODO: death ssound effect
+            oct_PlaySound(
+                    oct_GetAsset(gBundle, "sounds/die.wav"),
+                    (Oct_Vec2) {1, 1},
+                    false);
 
             create_particles_job(&(CreateParticlesJob) {
                     .lifetime = 0.8,
@@ -767,6 +789,21 @@ void kill_character(bool player_is_the_killer, Character *character, bool dramat
                     .y = character->physx.y + (character->physx.bb_height / 2) - 20,
                     .y_vel = -2
             });
+            create_particles_job(&(CreateParticlesJob){
+                    .lifetime = 3,
+                    .count = 1,
+                    .variation = dramatic ? 3 : 1,
+                    .spr = character_type_sprite(character),
+                    .tex = OCT_NO_ASSET,
+                    .x = character->physx.x,
+                    .y = character->physx.y,
+                    .y_vel = -2
+            });
+            character->player_controlled = false;
+            character->alive = false;
+            state.player_died = true;
+            state.player_die_time = state.total_time;
+            check_highscore();
         } else {
             state.lifespan *= 0.75;
 
@@ -1123,33 +1160,7 @@ void game_begin() {
     add_ai(CHARACTER_TYPE_JUMPER);
 }
 
-GameStatus game_update() {
-
-    oct_TilemapDraw(state.level_map);
-
-    // DEBUG
-    if (oct_KeyPressed(OCT_KEY_R))
-        add_ai(CHARACTER_TYPE_XY_SHOOTER);
-    if (oct_KeyPressed(OCT_KEY_Q))
-        add_ai(CHARACTER_TYPE_X_SHOOTER);
-    if (oct_KeyPressed(OCT_KEY_E))
-        add_ai(CHARACTER_TYPE_Y_SHOOTER);
-
-    // this is causing major fuckups that im not dealing with
-    //queue_particles_jobs(gFrameAllocator);
-
-    for (int i = 0; i < MAX_CHARACTERS; i++) {
-        if (!state.characters[i].alive) continue;
-        process_character(&state.characters[i]);
-    }
-
-    // TODO: Put this shit in a job cuz idgaf about race conditions
-    for (int i = 0; i < MAX_PROJECTILES; i++) {
-        if (!state.projectiles[i].alive) continue;
-        process_projectile(&state.projectiles[i]);
-    }
-
-    // draw player time left
+void draw_time_bar() {
     const float percent = oct_Clamp(0, 1, state.lifespan / state.max_lifespan);
     const float x = (GAME_WIDTH / 2) - (112 / 2);
     const float y = 16;
@@ -1165,8 +1176,8 @@ GameStatus game_update() {
             .Texture = {
                     .texture = oct_GetAsset(gBundle, "textures/timebar.png"),
                     .viewport = (Oct_Rectangle){
-                        .position = {0, 0},
-                        .size = {112 * percent, 32},
+                            .position = {0, 0},
+                            .size = {112 * percent, 32},
                     },
                     .position = {x, y},
                     .scale = {1, 1},
@@ -1175,8 +1186,9 @@ GameStatus game_update() {
             }
     };
     oct_Draw(&cmd);
-    state.lifespan -= 1.0 / 30.0;
+}
 
+void draw_kill_bar() {
     const float percent_kills = oct_Clamp(0, 1, (state.displayed_kills / ((float)state.req_kills - 1)));
     state.displayed_kills += (state.current_kills - state.displayed_kills) * 0.5;
     const float x2 = (GAME_WIDTH / 2) - (92 / 2);
@@ -1206,7 +1218,7 @@ GameStatus game_update() {
 
     const Oct_FontAtlas kingdom = oct_GetAsset(gBundle, "fnt_kingdom");
     // If user is 1 kill away from transforming, tell them
-    if (state.req_kills -1 == state.current_kills) {
+    if (state.req_kills -1 == state.current_kills && !state.player_died) {
         Oct_Vec2 text_size;
         const float scale = (sin(oct_Time() * 4) / 4) + 1;
         oct_GetTextSize(kingdom, text_size, scale, "Transform!");
@@ -1214,21 +1226,130 @@ GameStatus game_update() {
                            &(Oct_Colour) {0, 0, 0, 1}, scale, "Transform!");
         oct_DrawText(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (text_size[0] / 2), 32 - (text_size[1] / 2)}, scale, "Transform!");
     } else {
-        // Draw total time
-        Oct_Vec2 size;
-        oct_GetTextSize(kingdom, size, 1, "Score: %i", (int)state.score);
-        oct_DrawTextColour(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (size[0] / 2) + 1, 22}, &(Oct_Colour) {0, 0, 0, 1},
-                           1, "Score: %i", (int)state.score);
-        oct_DrawText(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (size[0] / 2), 21}, 1, "Score: %i", (int)state.score);
+        if (state.player_died && state.got_highscore) {
+            const float scale = (sin(oct_Time() * 4) / 4) + 1;
+            Oct_Vec2 text_size;
+            oct_GetTextSize(kingdom, text_size, scale, "Score: %i", (int)state.score);
+            oct_DrawTextColour(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (text_size[0] / 2) + 1, 32 - (text_size[1] / 2) + 1},
+                               &(Oct_Colour) {0, 0, 0, 1}, scale, "Score: %i", (int)state.score);
+            oct_DrawText(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (text_size[0] / 2), 32 - (text_size[1] / 2)}, scale, "Score: %i", (int)state.score);
+        } else {
+            // Draw total time
+            Oct_Vec2 size;
+            oct_GetTextSize(kingdom, size, 1, "Score: %i", (int)state.score);
+            oct_DrawTextColour(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (size[0] / 2) + 1, 22}, &(Oct_Colour) {0, 0, 0, 1},
+                               1, "Score: %i", (int)state.score);
+            oct_DrawText(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (size[0] / 2), 21}, 1, "Score: %i", (int)state.score);
+        }
     }
+}
 
-    state.total_time += 1.0 / 30.0;
-    state.score += 1;
-
-    // Spawn more enemies
+void handle_enemy_spawns() {
     if (gFrameCounter % 30 == 0) {
         add_ai(CHARACTER_TYPE_JUMPER);
     }
+}
+
+void draw_player_death_screen() {
+    if (state.player_died) {
+        const float banner_drop_time = 2; // seconds
+        const float drop_percent = 1 - oct_Clamp(0, 1, -pow(((state.total_time - state.player_die_time) / banner_drop_time), 2) + 1);
+        const float target_x = (GAME_WIDTH / 2);
+        const float target_y = (GAME_HEIGHT / 2);
+        const float real_y = target_y * drop_percent;
+
+        // a bunch of effects when the banner hits the bottom
+        if (drop_percent >= 1 && !state.banner_dropped) {
+            state.banner_dropped = true;
+            oct_PlaySound(
+                    oct_GetAsset(gBundle, "sounds/bumpwall.wav"),
+                    (Oct_Vec2){1, 1},
+                    false);
+            create_particles_job(&(CreateParticlesJob){
+                    .variation = 3,
+                    .y_vel = -4,
+                    .x_vel = 0,
+                    .tex = oct_GetAsset(gBundle, "textures/garbageparticle.png"),
+                    .spr = OCT_NO_ASSET,
+                    .x = (GAME_WIDTH / 2) - 64,
+                    .y = (GAME_HEIGHT / 2) + 24,
+                    .count = 20,
+                    .lifetime = 1
+            });
+            create_particles_job(&(CreateParticlesJob){
+                    .variation = 3,
+                    .y_vel = -4,
+                    .x_vel = 0,
+                    .tex = oct_GetAsset(gBundle, "textures/garbageparticle.png"),
+                    .spr = OCT_NO_ASSET,
+                    .x = (GAME_WIDTH / 2),
+                    .y = (GAME_HEIGHT / 2) + 24,
+                    .count = 20,
+                    .lifetime = 1
+            });
+            create_particles_job(&(CreateParticlesJob){
+                    .variation = 3,
+                    .y_vel = -4,
+                    .x_vel = 0,
+                    .tex = oct_GetAsset(gBundle, "textures/garbageparticle.png"),
+                    .spr = OCT_NO_ASSET,
+                    .x = (GAME_WIDTH / 2) + 64,
+                    .y = (GAME_HEIGHT / 2) + 24,
+                    .count = 20,
+                    .lifetime = 1
+            });
+        }
+
+        oct_DrawTextureIntExt(
+                OCT_INTERPOLATE_ALL, 21,
+                state.got_highscore ? oct_GetAsset(gBundle, "textures/highscore.png") : oct_GetAsset(gBundle, "textures/itsover.png"),
+                (Oct_Vec2){target_x, real_y},
+                (Oct_Vec2){drop_percent, drop_percent},
+                0, (Oct_Vec2){OCT_ORIGIN_MIDDLE, OCT_ORIGIN_MIDDLE});
+    }
+}
+
+GameStatus game_update() {
+
+    oct_TilemapDraw(state.level_map);
+
+    // DEBUG
+    if (oct_KeyPressed(OCT_KEY_R))
+        add_ai(CHARACTER_TYPE_XY_SHOOTER);
+    if (oct_KeyPressed(OCT_KEY_Q))
+        add_ai(CHARACTER_TYPE_X_SHOOTER);
+    if (oct_KeyPressed(OCT_KEY_E))
+        add_ai(CHARACTER_TYPE_Y_SHOOTER);
+
+    // this is causing major fuckups that im not dealing with
+    //queue_particles_jobs(gFrameAllocator);
+
+    for (int i = 0; i < MAX_CHARACTERS; i++) {
+        if (!state.characters[i].alive) continue;
+        process_character(&state.characters[i]);
+    }
+
+    // TODO: Put this shit in a job cuz idgaf about race conditions
+    for (int i = 0; i < MAX_PROJECTILES; i++) {
+        if (!state.projectiles[i].alive) continue;
+        process_projectile(&state.projectiles[i]);
+    }
+
+    // player :skull: if out of time
+    state.lifespan -= 1.0 / 30.0;
+    if (state.lifespan <= 0 && !state.player_died) {
+        kill_character(false, state.player, false);
+    }
+
+    draw_player_death_screen();
+    draw_time_bar();
+    draw_kill_bar();
+
+    state.total_time += 1.0 / 30.0;
+    if (!state.player_died)
+        state.score += 1;
+
+    handle_enemy_spawns();
 
     // particles on top for some fucking reason
     for (int i = 0; i < MAX_PARTICLES; i++) {
@@ -1238,6 +1359,12 @@ GameStatus game_update() {
 
     // just particles
     oct_WaitJobs();
+
+
+    // debug
+    if (oct_KeyDown(OCT_KEY_F)) {
+        return GAME_STATUS_END_GAME;
+    }
 
     return GAME_STATUS_PLAY_GAME;
 }
@@ -1288,7 +1415,7 @@ Save parse_save() {
     return (Save){0};
 }
 
-void save(Save *save) {
+void save_game(Save *save) {
     cJSON *json = cJSON_CreateObject();
     cJSON_AddNumberToObject(json, "highscore", save->highscore);
     // todo add ip shit eventually

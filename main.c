@@ -126,9 +126,10 @@ const float BOUNCE_PRESERVED_BOUNCE_WALL = 0.50; // how much velocity is preserv
 const float BOUNCE_PRESERVED = 0.20; // how much velocity is preserved when rebounding off walls
 const float GAMEPAD_DEADZONE = 0.25;
 const float PLAYER_JUMP_SPEED = 7;
+const float JUMPER_DESCEND_SPEED = 3; // how fast the player can descend as jumper
 const float PARTICLES_GROUND_IMPACT_SPEED = 6;
 const float SPEED_LIMIT = 12;
-const float PLAYER_STARTING_LIFESPAN = 1; // seconds;
+const float PLAYER_STARTING_LIFESPAN = 30; // seconds;
 const int32_t START_REQ_KILLS = 3;
 const float ENEMY_FLING_SPEED = 5;
 const int32_t PLAYER_I_FRAMES = 30;
@@ -616,7 +617,9 @@ InputProfile process_player(Character *character) {
 
     // action depending on type of entity
     if (oct_KeyPressed(OCT_KEY_SPACE) || oct_GamepadButtonPressed(0, OCT_GAMEPAD_BUTTON_X)) {
-        if (character->type == CHARACTER_TYPE_X_SHOOTER) {
+        if (character->type == CHARACTER_TYPE_JUMPER) {
+            input.y_acc = JUMPER_DESCEND_SPEED;
+        } else if (character->type == CHARACTER_TYPE_X_SHOOTER) {
             shoot_x_bullet(character);
         } else if (character->type == CHARACTER_TYPE_Y_SHOOTER) {
             shoot_y_bullet(character);
@@ -1146,7 +1149,7 @@ void game_begin() {
 
     // Add the player
     state.player = add_character(&(Character){
-        .type = CHARACTER_TYPE_X_SHOOTER,
+        .type = CHARACTER_TYPE_JUMPER,
         .player_controlled = true,
         .physx = {
                 .x = 15.5 * 16,
@@ -1448,6 +1451,7 @@ void *update(void *ptr) {
     // Use backbuffer
     oct_SetDrawTarget(gBackBuffer);
     oct_DrawClear(&(Oct_Colour){195.0 / 255.0, 209.0 / 255.0, 234.0 / 255.0, 1});
+    oct_DrawTexture(oct_GetAsset(gBundle, "textures/bg1.png"), (Oct_Vec2){0, 0});
 
     if (in_menu) {
         const GameStatus status = menu_update();

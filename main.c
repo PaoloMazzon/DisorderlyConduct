@@ -70,7 +70,7 @@ const float ACCELERATION_VALUES[] = {
         0.25, // CHARACTER_TYPE_Y_SHOOTER, this guy gotta haul ass
         0.08, // CHARACTER_TYPE_XY_SHOOTER,
         0.2, // CHARACTER_TYPE_SWORDSMITH,
-        0.02, // CHARACTER_TYPE_LASER,
+        0.08, // CHARACTER_TYPE_LASER,
         0.20, // CHARACTER_TYPE_DASHER,
 };
 
@@ -94,8 +94,8 @@ const float ACTION_TELEGRAPH_TIMES[] = {
         0.3, // CHARACTER_TYPE_Y_SHOOTER,
         0.1, // CHARACTER_TYPE_XY_SHOOTER,
         1, // CHARACTER_TYPE_SWORDSMITH,
-        3, // CHARACTER_TYPE_LASER,
-        3, // CHARACTER_TYPE_DASHER,
+        1, // CHARACTER_TYPE_LASER,
+        0, // CHARACTER_TYPE_DASHER,
 };
 
 // chance on each potential action frame ai will do something
@@ -177,6 +177,7 @@ const float XY_SHOOTER_RECOIL = 4;
 const float DASHER_FLING_Y_DISTANCE = 10;
 const float DASHER_FLING_X_DISTANCE = 10;
 const float BOMBER_BLAST_RADIUS = 64;
+const int32_t MOUTH_OPEN_DURATION = 8;
 const char *SAVE_NAME = "save.json";
 
 ///////////////////////// STRUCTS /////////////////////////
@@ -222,6 +223,7 @@ typedef struct Character_t {
     PhysicsObject physx;
     float facing; // direction facing, -1 or 1
     float shown_facing; // for a cool visual effect
+    int32_t mouth_open; // for laser animation
 
     // for telegraphing ai behaviour
     bool wants_to_action; // might be unnecessary idk
@@ -238,13 +240,9 @@ typedef struct Particle_t {
     float total_lifetime;
     uint64_t id;
     _Atomic bool alive;
-    union {
-        struct {
-            Oct_Sprite sprite;
-            Oct_SpriteInstance instance;
-        };
-        Oct_Texture texture;
-    };
+    Oct_Sprite sprite;
+    Oct_SpriteInstance instance;
+    Oct_Texture texture;
 } Particle;
 
 typedef struct Projectile_t {
@@ -588,7 +586,19 @@ void draw_character(Character *character) {
                 (Oct_Vec2) {x, character->physx.y},
                 (Oct_Vec2){character->shown_facing, 1},
                 0, (Oct_Vec2){0, 0});
-    }else if (character->type == CHARACTER_TYPE_X_SHOOTER) {
+    } else if (character->type == CHARACTER_TYPE_LASER) {
+        const float x = character->facing == 1 ? character->physx.x : (character->physx.x + character->physx.bb_width);
+        character->mouth_open -= 1;
+        const Oct_Sprite spr = character->mouth_open > 0 ? oct_GetAsset(gBundle, "sprites/playerlaseropen.json") : character_type_sprite(character);
+        oct_DrawSpriteIntColourExt(
+                OCT_INTERPOLATE_ALL, character->id,
+                spr,
+                &character->sprite,
+                &c,
+                (Oct_Vec2) {x, character->physx.y},
+                (Oct_Vec2){character->shown_facing, 1},
+                0, (Oct_Vec2){0, 0});
+    } else if (character->type == CHARACTER_TYPE_X_SHOOTER) {
         const float x = character->facing == 1 ? character->physx.x : (character->physx.x + character->physx.bb_width);
         const float gun_x = character->facing == 1 ? (character->physx.x + character->physx.bb_width) : character->physx.x;
         oct_DrawSpriteIntColourExt(
@@ -672,6 +682,37 @@ void draw_character(Character *character) {
 }
 void kill_character(bool player_is_killer, Character *character, bool dramatic);
 
+// bwah
+void imma_firin_muh_lazor(Character *character) {
+    oct_PlaySound(
+            oct_GetAsset(gBundle, "sounds/laser.wav"),
+            (Oct_Vec2){1, 1},
+            0);
+    create_particles_job(&(CreateParticlesJob) {
+            .lifetime = 0.8,
+            .count = 1,
+            .variation = 1,
+            .spr = OCT_NO_ASSET,
+            .tex = oct_GetAsset(gBundle, "textures/lazer.png"),
+            .x = character->physx.x + (character->physx.bb_width / 2) - (character->facing == -1 ? 512 : 0),
+            .y = character->physx.y + (character->physx.bb_height / 2) - 4,
+            .y_vel = -2,
+            .x_vel = (character->facing == -1 ? 3 : 3)
+    });
+    for (int i = 0 ; i < 10; i++) {
+        CollisionEvent kaboom = collision_at_no_walls(
+                character, null,
+                character->physx.x + (character->physx.bb_width / 2) - (character->facing == -1 ? 512 : 0),
+                character->physx.y - (character->physx.bb_width / 2) - 8,
+                512,
+                16);
+        if (kaboom.type == COLLISION_EVENT_TYPE_CHARACTER) {
+            kill_character(character->player_controlled, kaboom.character, true);
+        }
+    }
+    character->mouth_open = MOUTH_OPEN_DURATION;
+}
+
 // blow the fuck up
 void blow_up(Character *character) {
     oct_PlaySound(
@@ -732,6 +773,8 @@ InputProfile process_player(Character *character) {
     if (oct_KeyPressed(OCT_KEY_SPACE) || oct_GamepadButtonPressed(0, OCT_GAMEPAD_BUTTON_X)) {
         if (character->type == CHARACTER_TYPE_JUMPER) {
             input.y_acc = JUMPER_DESCEND_SPEED;
+        } else if (character->type == CHARACTER_TYPE_LASER) {
+            imma_firin_muh_lazor(character);
         } else if (character->type == CHARACTER_TYPE_X_SHOOTER) {
             shoot_x_bullet(character);
         } else if (character->type == CHARACTER_TYPE_Y_SHOOTER) {
@@ -999,6 +1042,21 @@ InputProfile pre_process_ai(Character *character) {
                 shoot_y_bullet(character);
             else
                 shoot_xy_bullet(character);
+            character->wants_to_action = false;
+        }
+    } else if (character->type == CHARACTER_TYPE_LASER) {
+        if (gFrameCounter % ACTION_CHANCE_FREQUENCY[character->type] == 0 &&
+            oct_Random(0, 1) > ACTION_CHANCE[character->type] &&
+            kinda_touching_ground &&
+            character->action_timer <= ACTION_COOLDOWNS[character->type] &&
+            character->physx.y + character->physx.bb_height > 3 * 16) {
+
+            character->wants_to_action = true;
+            character->action_timer = ACTION_TELEGRAPH_TIMES[character->type];
+        }
+
+        if (character->wants_to_action && character->action_timer <= 0) {
+            imma_firin_muh_lazor(character);
             character->wants_to_action = false;
         }
     } else if (character->type == CHARACTER_TYPE_BOMBER) {
@@ -1316,7 +1374,7 @@ void game_begin() {
 
     // Add the player
     state.player = add_character(&(Character){
-        .type = CHARACTER_TYPE_BOMBER,
+        .type = CHARACTER_TYPE_LASER,
         .player_controlled = true,
         .physx = {
                 .x = 15.5 * 16,

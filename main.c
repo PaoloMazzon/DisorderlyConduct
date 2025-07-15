@@ -67,11 +67,11 @@ const float ACCELERATION_VALUES[] = {
         0, // CHARACTER_TYPE_INVALID,
         0.12, // CHARACTER_TYPE_JUMPER,
         0.08, // CHARACTER_TYPE_X_SHOOTER,
-        0.20, // CHARACTER_TYPE_Y_SHOOTER, this guy gotta haul ass
+        0.25, // CHARACTER_TYPE_Y_SHOOTER, this guy gotta haul ass
         0.08, // CHARACTER_TYPE_XY_SHOOTER,
         0.2, // CHARACTER_TYPE_SWORDSMITH,
         0.02, // CHARACTER_TYPE_LASER,
-        0.02, // CHARACTER_TYPE_DASHER,
+        0.20, // CHARACTER_TYPE_DASHER,
 };
 
 // how long after taking an action an ai is allowed to take it again
@@ -107,7 +107,7 @@ const float ACTION_CHANCE[] = {
         0.5, // CHARACTER_TYPE_XY_SHOOTER,
         0.5, // CHARACTER_TYPE_SWORDSMITH,
         0.5, // CHARACTER_TYPE_LASER,
-        0.5, // CHARACTER_TYPE_DASHER,
+        1, // CHARACTER_TYPE_DASHER,
 };
 
 // every x frames the above chances are rolled
@@ -119,7 +119,7 @@ const int ACTION_CHANCE_FREQUENCY[] = {
         8, // CHARACTER_TYPE_XY_SHOOTER,
         9, // CHARACTER_TYPE_SWORDSMITH,
         10, // CHARACTER_TYPE_LASER,
-        10, // CHARACTER_TYPE_DASHER,
+        1, // CHARACTER_TYPE_DASHER,
 };
 
 // extra score player gets for killing this enemy
@@ -174,6 +174,8 @@ const float Y_SHOOTER_BULLET_SPEED = 12;
 const float XY_SHOOTER_BULLET_LIFETIME = 2;
 const float XY_SHOOTER_BULLET_SPEED = 12;
 const float XY_SHOOTER_RECOIL = 4;
+const float DASHER_FLING_Y_DISTANCE = 10;
+const float DASHER_FLING_X_DISTANCE = 10;
 const char *SAVE_NAME = "save.json";
 
 ///////////////////////// STRUCTS /////////////////////////
@@ -374,8 +376,9 @@ Oct_Sprite character_type_sprite(Character *character) {
             case CHARACTER_TYPE_X_SHOOTER: return oct_GetAsset(gBundle, "sprites/playershooter.json");
             case CHARACTER_TYPE_Y_SHOOTER: return oct_GetAsset(gBundle, "sprites/playershooter.json");
             case CHARACTER_TYPE_XY_SHOOTER: return oct_GetAsset(gBundle, "sprites/playershooter.json");
-            case CHARACTER_TYPE_BOMBER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
-            case CHARACTER_TYPE_LASER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
+            case CHARACTER_TYPE_BOMBER: return oct_GetAsset(gBundle, "sprites/playerbomber.json");
+            case CHARACTER_TYPE_LASER: return oct_GetAsset(gBundle, "sprites/playerlaser.json");
+            case CHARACTER_TYPE_DASHER: return oct_GetAsset(gBundle, "sprites/playerdasher.json");
             default: return OCT_NO_ASSET;
         }
     }
@@ -385,8 +388,9 @@ Oct_Sprite character_type_sprite(Character *character) {
         case CHARACTER_TYPE_X_SHOOTER: return oct_GetAsset(gBundle, "sprites/shooter.json");
         case CHARACTER_TYPE_Y_SHOOTER: return oct_GetAsset(gBundle, "sprites/shooter.json");
         case CHARACTER_TYPE_XY_SHOOTER: return oct_GetAsset(gBundle, "sprites/shooter.json");
-        case CHARACTER_TYPE_BOMBER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
-        case CHARACTER_TYPE_LASER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
+        case CHARACTER_TYPE_BOMBER: return oct_GetAsset(gBundle, "sprites/bomber.json");
+        case CHARACTER_TYPE_LASER: return oct_GetAsset(gBundle, "sprites/laser.json");
+        case CHARACTER_TYPE_DASHER: return oct_GetAsset(gBundle, "sprites/dasher.json");
         default: return OCT_NO_ASSET;
     }
 }
@@ -542,6 +546,9 @@ void draw_character(Character *character) {
                 (Oct_Vec2){character->physx.x - 33 + (character->physx.bb_width / 2), character->physx.y - 80 + character->physx.bb_height});
     }
 
+    // paper mario effect
+    character->shown_facing += (character->facing - character->shown_facing) * 0.6;
+
     // Draw telegraphing effect
     if (character->wants_to_action && !character->player_controlled) {
         const float x = character->physx.x + (character->physx.bb_width / 2) - 8.5;
@@ -554,7 +561,6 @@ void draw_character(Character *character) {
 
     if (character->type == CHARACTER_TYPE_JUMPER) {
         const float x = character->facing == 1 ? character->physx.x : (character->physx.x + character->physx.bb_width);
-        character->shown_facing += (character->facing - character->shown_facing) * 0.6;
         oct_DrawSpriteIntColourExt(
                 OCT_INTERPOLATE_ALL, character->id,
                 character_type_sprite(character),
@@ -566,7 +572,6 @@ void draw_character(Character *character) {
     } else if (character->type == CHARACTER_TYPE_X_SHOOTER) {
         const float x = character->facing == 1 ? character->physx.x : (character->physx.x + character->physx.bb_width);
         const float gun_x = character->facing == 1 ? (character->physx.x + character->physx.bb_width) : character->physx.x;
-        character->shown_facing += (character->facing - character->shown_facing) * 0.6;
         oct_DrawSpriteIntColourExt(
                 OCT_INTERPOLATE_ALL, character->id,
                 character_type_sprite(character),
@@ -585,7 +590,6 @@ void draw_character(Character *character) {
     } else if (character->type == CHARACTER_TYPE_XY_SHOOTER) {
         const float x = character->facing == 1 ? character->physx.x : (character->physx.x + character->physx.bb_width);
         const float gun_x = character->facing == 1 ? (character->physx.x + character->physx.bb_width - 4) : character->physx.x + 4;
-        character->shown_facing += (character->facing - character->shown_facing) * 0.6;
         oct_DrawSpriteIntColourExt(
                 OCT_INTERPOLATE_ALL, character->id,
                 character_type_sprite(character),
@@ -604,7 +608,6 @@ void draw_character(Character *character) {
     } else if (character->type == CHARACTER_TYPE_Y_SHOOTER) {
         const float x = character->facing == 1 ? character->physx.x : (character->physx.x + character->physx.bb_width);
         const float gun_x = x + (character->physx.bb_width / 2) - (19 / 2);
-        character->shown_facing += (character->facing - character->shown_facing) * 0.6;
         oct_DrawSpriteIntColourExt(
                 OCT_INTERPOLATE_ALL, character->id,
                 character_type_sprite(character),
@@ -620,9 +623,36 @@ void draw_character(Character *character) {
                 (Oct_Vec2) {gun_x, character->physx.y - 23},
                 (Oct_Vec2){character->shown_facing, 1},
                 0, (Oct_Vec2){0, 0});
+    } else if (character->type == CHARACTER_TYPE_DASHER) {
+        const float x = character->facing == 1 ? character->physx.x : (character->physx.x + character->physx.bb_width);
+        const float gun_x = character->facing == 1 ? (character->physx.x + character->physx.bb_width) : character->physx.x;
+        const float gun2_x = character->facing == -1 ? (character->physx.x + character->physx.bb_width) : character->physx.x;
+        oct_DrawSpriteIntColourExt(
+                OCT_INTERPOLATE_ALL, character->id,
+                character_type_sprite(character),
+                &character->sprite,
+                &c,
+                (Oct_Vec2) {x, character->physx.y},
+                (Oct_Vec2){character->shown_facing, 1},
+                0, (Oct_Vec2){0, 0});
+        oct_DrawTextureIntColourExt(
+                OCT_INTERPOLATE_ALL, character->id + 3,
+                oct_GetAsset(gBundle, "textures/jacked.png"),
+                &c,
+                (Oct_Vec2) {gun_x, character->physx.y - 4},
+                (Oct_Vec2){character->shown_facing, 1},
+                0, (Oct_Vec2){0, 0});
+        oct_DrawTextureIntColourExt(
+                OCT_INTERPOLATE_ALL, character->id + 5,
+                oct_GetAsset(gBundle, "textures/jacked.png"),
+                &c,
+                (Oct_Vec2) {gun2_x, character->physx.y - 4},
+                (Oct_Vec2){-character->shown_facing, 1},
+                0, (Oct_Vec2){0, 0});
     } // TODO: The rest of these
 }
 
+void kill_character(bool player_is_killer, Character *character, bool dramatic);
 void shoot_x_bullet(Character *character);
 void shoot_y_bullet(Character *character);
 void shoot_xy_bullet(Character *character);
@@ -659,6 +689,18 @@ InputProfile process_player(Character *character) {
             shoot_y_bullet(character);
         } else if (character->type == CHARACTER_TYPE_XY_SHOOTER) {
             shoot_xy_bullet(character);
+        } else if (character->type == CHARACTER_TYPE_DASHER && kinda_touching_ground) {
+            CollisionEvent left = collision_at(character, null, character->physx.x + character->physx.bb_width, character->physx.y-10, character->physx.bb_width, character->physx.bb_height + 10);
+            CollisionEvent right = collision_at(character, null, character->physx.x - character->physx.bb_width, character->physx.y-10, character->physx.bb_width, character->physx.bb_height + 10);
+            oct_PlaySound(oct_GetAsset(gBundle, "sounds/punch.wav"), (Oct_Vec2){1, 1}, false);
+            character->physx.y_vel -= DASHER_FLING_Y_DISTANCE;
+            if (left.type == COLLISION_EVENT_TYPE_CHARACTER) {
+                left.character->physx.y_vel -= DASHER_FLING_Y_DISTANCE;
+                kill_character(true, left.character, true);
+            } else if (right.type == COLLISION_EVENT_TYPE_CHARACTER) {
+                right.character->physx.y_vel -= DASHER_FLING_Y_DISTANCE;
+                kill_character(true, right.character, true);
+            }
         }
     }
 
@@ -670,8 +712,6 @@ InputProfile process_player(Character *character) {
 
     return input;
 }
-
-void kill_character(bool player_is_killer, Character *character, bool dramatic);
 
 // transforms the player into this dude
 void take_body(Character *character) {
@@ -782,7 +822,7 @@ void kill_character(bool player_is_the_killer, Character *character, bool dramat
             .tex = OCT_NO_ASSET,
             .x = character->physx.x,
             .y = character->physx.y,
-            .y_vel = -2
+            .y_vel = dramatic ? -10 : -2
         });
 
         // small sound
@@ -871,7 +911,7 @@ InputProfile pre_process_ai(Character *character) {
 
     // Get input from ai
     input.x_acc = ACCELERATION_VALUES[character->type] * character->direction;
-    const bool kinda_touching_ground = collision_at(character, null, character->physx.x, character->physx.y + 1, character->physx.bb_width, character->physx.bb_height).type != 0;
+    const bool kinda_touching_ground = collision_at(character, null, character->physx.x, character->physx.y + 2, character->physx.bb_width, character->physx.bb_height).type != 0;
 
     // Jumpers might jump every now and again
     if (character->type == CHARACTER_TYPE_JUMPER) {
@@ -908,6 +948,27 @@ InputProfile pre_process_ai(Character *character) {
             else
                 shoot_xy_bullet(character);
             character->wants_to_action = false;
+        }
+    } else if (character->type == CHARACTER_TYPE_DASHER) {
+        // dasher is always pissed
+        character->wants_to_action = true;
+
+        if (kinda_touching_ground) {
+            CollisionEvent left = collision_at(character, null, character->physx.x + character->physx.bb_width, character->physx.y, character->physx.bb_width, character->physx.bb_height);
+            CollisionEvent right = collision_at(character, null, character->physx.x - character->physx.bb_width, character->physx.y, character->physx.bb_width, character->physx.bb_height);
+            if (left.type == COLLISION_EVENT_TYPE_CHARACTER) {
+                left.character->physx.y_vel -= DASHER_FLING_Y_DISTANCE;
+                character->physx.y_vel -= DASHER_FLING_Y_DISTANCE;
+                character->physx.x_vel -= DASHER_FLING_X_DISTANCE;
+                kill_character(false, left.character, true);
+                oct_PlaySound(oct_GetAsset(gBundle, "sounds/punch.wav"), (Oct_Vec2){1, 1}, false);
+            } else if (right.type == COLLISION_EVENT_TYPE_CHARACTER) {
+                right.character->physx.y_vel -= DASHER_FLING_Y_DISTANCE;
+                character->physx.y_vel -= DASHER_FLING_Y_DISTANCE;
+                character->physx.x_vel += DASHER_FLING_X_DISTANCE;
+                kill_character(false, right.character, true);
+                oct_PlaySound(oct_GetAsset(gBundle, "sounds/punch.wav"), (Oct_Vec2){1, 1}, false);
+            }
         }
     }
 
@@ -1188,7 +1249,7 @@ void game_begin() {
 
     // Add the player
     state.player = add_character(&(Character){
-        .type = CHARACTER_TYPE_JUMPER,
+        .type = CHARACTER_TYPE_DASHER,
         .player_controlled = true,
         .physx = {
                 .x = 15.5 * 16,
@@ -1434,12 +1495,12 @@ GameStatus game_update() {
     oct_TilemapDraw(state.level_map);
 
     // DEBUG
-    if (oct_KeyPressed(OCT_KEY_R))
-        add_ai(CHARACTER_TYPE_XY_SHOOTER);
     if (oct_KeyPressed(OCT_KEY_Q))
-        add_ai(CHARACTER_TYPE_X_SHOOTER);
+        add_ai(CHARACTER_TYPE_DASHER);
     if (oct_KeyPressed(OCT_KEY_E))
-        add_ai(CHARACTER_TYPE_Y_SHOOTER);
+        add_ai(CHARACTER_TYPE_LASER);
+    if (oct_KeyPressed(OCT_KEY_R))
+        add_ai(CHARACTER_TYPE_BOMBER);
 
     // this is causing major fuckups that im not dealing with
     //queue_particles_jobs(gFrameAllocator);

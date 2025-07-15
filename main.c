@@ -9,11 +9,12 @@
 typedef enum {
     CHARACTER_TYPE_INVALID = 0, // for empty list positions
     CHARACTER_TYPE_JUMPER = 1,
-    CHARACTER_TYPE_X_SHOOTER = 2,
-    CHARACTER_TYPE_Y_SHOOTER = 3,
+    CHARACTER_TYPE_Y_SHOOTER = 2,
+    CHARACTER_TYPE_X_SHOOTER = 3,
     CHARACTER_TYPE_XY_SHOOTER = 4,
-    CHARACTER_TYPE_SWORDSMITH = 5,
+    CHARACTER_TYPE_BOMBER = 5,
     CHARACTER_TYPE_LASER = 6,
+    CHARACTER_TYPE_DASHER = 7,
 } CharacterType;
 
 // For transitioning game states
@@ -58,6 +59,7 @@ const float CHARACTER_TYPE_LIFESPANS[] = {
         10, // CHARACTER_TYPE_XY_SHOOTER,
         8, // CHARACTER_TYPE_SWORDSMITH,
         3, // CHARACTER_TYPE_LASER,
+        3, // CHARACTER_TYPE_DASHER,
 };
 
 // acceleration values for the ai, player uses this * a constant as well
@@ -69,6 +71,7 @@ const float ACCELERATION_VALUES[] = {
         0.08, // CHARACTER_TYPE_XY_SHOOTER,
         0.2, // CHARACTER_TYPE_SWORDSMITH,
         0.02, // CHARACTER_TYPE_LASER,
+        0.02, // CHARACTER_TYPE_DASHER,
 };
 
 // how long after taking an action an ai is allowed to take it again
@@ -80,6 +83,7 @@ const float ACTION_COOLDOWNS[] = {
         0.5, // CHARACTER_TYPE_XY_SHOOTER,
         0, // CHARACTER_TYPE_SWORDSMITH,
         3, // CHARACTER_TYPE_LASER,
+        3, // CHARACTER_TYPE_DASHER,
 };
 
 // how long an ai has to telegraph an action
@@ -91,6 +95,7 @@ const float ACTION_TELEGRAPH_TIMES[] = {
         0.1, // CHARACTER_TYPE_XY_SHOOTER,
         1, // CHARACTER_TYPE_SWORDSMITH,
         3, // CHARACTER_TYPE_LASER,
+        3, // CHARACTER_TYPE_DASHER,
 };
 
 // chance on each potential action frame ai will do something
@@ -102,6 +107,7 @@ const float ACTION_CHANCE[] = {
         0.5, // CHARACTER_TYPE_XY_SHOOTER,
         0.5, // CHARACTER_TYPE_SWORDSMITH,
         0.5, // CHARACTER_TYPE_LASER,
+        0.5, // CHARACTER_TYPE_DASHER,
 };
 
 // every x frames the above chances are rolled
@@ -113,7 +119,33 @@ const int ACTION_CHANCE_FREQUENCY[] = {
         8, // CHARACTER_TYPE_XY_SHOOTER,
         9, // CHARACTER_TYPE_SWORDSMITH,
         10, // CHARACTER_TYPE_LASER,
+        10, // CHARACTER_TYPE_DASHER,
 };
+
+// extra score player gets for killing this enemy
+const int ADDITIONAL_SCORE[] = {
+        0, // CHARACTER_TYPE_INVALID,
+        5, // CHARACTER_TYPE_JUMPER,
+        6, // CHARACTER_TYPE_X_SHOOTER,
+        7, // CHARACTER_TYPE_Y_SHOOTER,
+        8, // CHARACTER_TYPE_XY_SHOOTER,
+        9, // CHARACTER_TYPE_SWORDSMITH,
+        10, // CHARACTER_TYPE_LASER,
+        10, // CHARACTER_TYPE_DASHER,
+};
+
+const int32_t GAME_PHASES = 8;
+const int32_t SPAWN_FREQUENCIES[] = { // in frames
+        100,
+        90,
+        80,
+        70,
+        60,
+        50,
+        40,
+        30,
+};
+const int32_t TIME_BETWEEN_PHASES = 30 * 15;
 
 #define MAX_CHARACTERS 100
 #define MAX_PROJECTILES 100
@@ -272,6 +304,8 @@ typedef struct GameState_t {
     float player_die_time;
     bool banner_dropped; // animation
     bool got_highscore;
+    int32_t frame_count;
+    int32_t game_phase;
 
     Oct_SpriteInstance fire;
     float score; // literally just 1 per frame
@@ -340,7 +374,7 @@ Oct_Sprite character_type_sprite(Character *character) {
             case CHARACTER_TYPE_X_SHOOTER: return oct_GetAsset(gBundle, "sprites/playershooter.json");
             case CHARACTER_TYPE_Y_SHOOTER: return oct_GetAsset(gBundle, "sprites/playershooter.json");
             case CHARACTER_TYPE_XY_SHOOTER: return oct_GetAsset(gBundle, "sprites/playershooter.json");
-            case CHARACTER_TYPE_SWORDSMITH: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
+            case CHARACTER_TYPE_BOMBER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
             case CHARACTER_TYPE_LASER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
             default: return OCT_NO_ASSET;
         }
@@ -351,7 +385,7 @@ Oct_Sprite character_type_sprite(Character *character) {
         case CHARACTER_TYPE_X_SHOOTER: return oct_GetAsset(gBundle, "sprites/shooter.json");
         case CHARACTER_TYPE_Y_SHOOTER: return oct_GetAsset(gBundle, "sprites/shooter.json");
         case CHARACTER_TYPE_XY_SHOOTER: return oct_GetAsset(gBundle, "sprites/shooter.json");
-        case CHARACTER_TYPE_SWORDSMITH: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
+        case CHARACTER_TYPE_BOMBER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
         case CHARACTER_TYPE_LASER: return OCT_NO_ASSET;//oct_GetAsset(gBundle, "sprites/");
         default: return OCT_NO_ASSET;
     }
@@ -774,6 +808,9 @@ void kill_character(bool player_is_the_killer, Character *character, bool dramat
                 take_body(character);
             }
         }
+        if (!state.player_died) {
+            state.score += ADDITIONAL_SCORE[character->type];
+        }
     } else if (state.player_iframes <= 0 && !state.player_died) {
         state.player_iframes = PLAYER_I_FRAMES;
         if (state.lifespan <= 0) {
@@ -841,7 +878,8 @@ InputProfile pre_process_ai(Character *character) {
         if (gFrameCounter % ACTION_CHANCE_FREQUENCY[character->type] == 0 &&
             oct_Random(0, 1) > ACTION_CHANCE[character->type] &&
             kinda_touching_ground &&
-            character->action_timer <= ACTION_COOLDOWNS[character->type]) {
+            character->action_timer <= ACTION_COOLDOWNS[character->type] &&
+            character->physx.y + character->physx.bb_height > 3 * 16) {
 
             character->wants_to_action = true;
             character->action_timer = ACTION_TELEGRAPH_TIMES[character->type];
@@ -855,7 +893,8 @@ InputProfile pre_process_ai(Character *character) {
         if (gFrameCounter % ACTION_CHANCE_FREQUENCY[character->type] == 0 &&
             oct_Random(0, 1) > ACTION_CHANCE[character->type] &&
             kinda_touching_ground &&
-            character->action_timer <= ACTION_COOLDOWNS[character->type]) {
+            character->action_timer <= ACTION_COOLDOWNS[character->type] &&
+            character->physx.y + character->physx.bb_height > 3 * 16) {
 
             character->wants_to_action = true;
             character->action_timer = ACTION_TELEGRAPH_TIMES[character->type];
@@ -1247,9 +1286,87 @@ void draw_kill_bar() {
     }
 }
 
+int32_t same_chance(int32_t n){
+    return (int32_t)floorf(oct_Random(0, n));
+}
+
 void handle_enemy_spawns() {
-    if (gFrameCounter % 30 == 0) {
-        add_ai(CHARACTER_TYPE_JUMPER);
+    state.frame_count++;
+    if (state.frame_count >= TIME_BETWEEN_PHASES && state.game_phase < GAME_PHASES - 1) {
+        state.game_phase += 1;
+        state.frame_count = 0;
+    }
+
+    if (gFrameCounter % SPAWN_FREQUENCIES[state.game_phase] == 0) {
+        if (state.game_phase == 0) {
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_JUMPER,
+                    CHARACTER_TYPE_Y_SHOOTER
+            };
+            const int32_t opp = same_chance(2);
+            add_ai(opps[opp]);
+        } else if (state.game_phase == 1) {
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_JUMPER,
+                    CHARACTER_TYPE_Y_SHOOTER,
+                    CHARACTER_TYPE_X_SHOOTER
+            };
+            const int32_t opp = same_chance(3);
+            add_ai(opps[opp]);
+        } else if (state.game_phase == 2) {
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_XY_SHOOTER,
+                    CHARACTER_TYPE_Y_SHOOTER,
+                    CHARACTER_TYPE_X_SHOOTER
+            };
+            const int32_t opp = same_chance(3);
+            add_ai(opps[opp]);
+        } else if (state.game_phase == 3) {
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_XY_SHOOTER,
+                    CHARACTER_TYPE_XY_SHOOTER,
+                    CHARACTER_TYPE_JUMPER,
+                    CHARACTER_TYPE_BOMBER
+            };
+            const int32_t opp = same_chance(4);
+            add_ai(opps[opp]);
+        } else if (state.game_phase == 4) {
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_JUMPER,
+                    CHARACTER_TYPE_X_SHOOTER,
+                    CHARACTER_TYPE_LASER,
+                    CHARACTER_TYPE_DASHER
+            };
+            const int32_t opp = same_chance(4);
+            add_ai(opps[opp]);
+        } else if (state.game_phase == 5) {
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_DASHER
+            };
+            const int32_t opp = same_chance(1);
+            add_ai(opps[opp]);
+        } else if (state.game_phase == 6) {
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_LASER,
+                    CHARACTER_TYPE_DASHER,
+                    CHARACTER_TYPE_BOMBER,
+            };
+            const int32_t opp = same_chance(3);
+            add_ai(opps[opp]);
+        } else if (state.game_phase == 7) {
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_JUMPER,
+                    CHARACTER_TYPE_X_SHOOTER,
+                    CHARACTER_TYPE_Y_SHOOTER,
+                    CHARACTER_TYPE_XY_SHOOTER,
+                    CHARACTER_TYPE_LASER,
+                    CHARACTER_TYPE_DASHER,
+                    CHARACTER_TYPE_BOMBER,
+                    CHARACTER_TYPE_BOMBER,
+            };
+            const int32_t opp = same_chance(8);
+            add_ai(opps[opp]);
+        }
     }
 }
 
@@ -1350,7 +1467,7 @@ GameStatus game_update() {
 
     state.total_time += 1.0 / 30.0;
     if (!state.player_died)
-        state.score += 1;
+        state.score += 1 + state.game_phase;
 
     handle_enemy_spawns();
 

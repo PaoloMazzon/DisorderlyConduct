@@ -176,6 +176,7 @@ const float XY_SHOOTER_BULLET_SPEED = 12;
 const float XY_SHOOTER_RECOIL = 4;
 const float DASHER_FLING_Y_DISTANCE = 10;
 const float DASHER_FLING_X_DISTANCE = 10;
+const float BOMBER_BLAST_RADIUS = 64;
 const char *SAVE_NAME = "save.json";
 
 ///////////////////////// STRUCTS /////////////////////////
@@ -438,6 +439,24 @@ CollisionEvent collision_at(Character *this_c, Projectile *this_p, float x, floa
     return e;
 }
 
+// same as above but walls and projectiles dont count
+CollisionEvent collision_at_no_walls(Character *this_c, Projectile *this_p, float x, float y, float width, float height) {
+    CollisionEvent e = {.type = COLLISION_EVENT_TYPE_NO_COLLISION};
+
+    // If no wall collision we will check against all possible physics objects
+    // TODO: THIS MIGHT BE A PERFORMANCE PROBLEM LMAO
+    for (int i = 0; i < MAX_CHARACTERS; i++) {
+        if (&state.characters[i] == this_c || !state.characters[i].alive) continue;
+        if (aabb(x, y, width, height, state.characters[i].physx.x, state.characters[i].physx.y, state.characters[i].physx.bb_width, state.characters[i].physx.bb_height)) {
+            e.type = COLLISION_EVENT_TYPE_CHARACTER;
+            e.character = &state.characters[i];
+            return e;
+        }
+    }
+
+    return e;
+}
+
 // Returns true if a horizontal collision was processed
 bool process_physics(Character *this_c, Projectile *this_p, PhysicsObject *physx, float x_acceleration, float y_acceleration) {
     bool collision = false;
@@ -559,7 +578,7 @@ void draw_character(Character *character) {
                 );
     }
 
-    if (character->type == CHARACTER_TYPE_JUMPER) {
+    if (character->type == CHARACTER_TYPE_JUMPER || character->type == CHARACTER_TYPE_BOMBER) {
         const float x = character->facing == 1 ? character->physx.x : (character->physx.x + character->physx.bb_width);
         oct_DrawSpriteIntColourExt(
                 OCT_INTERPOLATE_ALL, character->id,
@@ -569,7 +588,7 @@ void draw_character(Character *character) {
                 (Oct_Vec2) {x, character->physx.y},
                 (Oct_Vec2){character->shown_facing, 1},
                 0, (Oct_Vec2){0, 0});
-    } else if (character->type == CHARACTER_TYPE_X_SHOOTER) {
+    }else if (character->type == CHARACTER_TYPE_X_SHOOTER) {
         const float x = character->facing == 1 ? character->physx.x : (character->physx.x + character->physx.bb_width);
         const float gun_x = character->facing == 1 ? (character->physx.x + character->physx.bb_width) : character->physx.x;
         oct_DrawSpriteIntColourExt(
@@ -651,8 +670,38 @@ void draw_character(Character *character) {
                 0, (Oct_Vec2){0, 0});
     } // TODO: The rest of these
 }
-
 void kill_character(bool player_is_killer, Character *character, bool dramatic);
+
+// blow the fuck up
+void blow_up(Character *character) {
+    oct_PlaySound(
+            oct_GetAsset(gBundle, "sounds/kaboom.wav"),
+            (Oct_Vec2){1, 1},
+            0);
+    create_particles_job(&(CreateParticlesJob) {
+            .lifetime = 0.8,
+            .count = 1,
+            .variation = 0,
+            .spr = oct_GetAsset(gBundle, "sprites/kaboom.json"),
+            .tex = OCT_NO_ASSET,
+            .x = character->physx.x + (character->physx.bb_width / 2) - 64,
+            .y = character->physx.y + (character->physx.bb_height / 2) - 64,
+            .y_vel = -2,
+            .x_vel = 3
+    });
+    for (int i = 0 ; i < 10; i++) {
+        CollisionEvent kaboom = collision_at_no_walls(
+                character, null,
+                character->physx.x - (character->physx.bb_width / 2) - BOMBER_BLAST_RADIUS,
+                character->physx.y - (character->physx.bb_width / 2) - BOMBER_BLAST_RADIUS,
+                BOMBER_BLAST_RADIUS * 2,
+                BOMBER_BLAST_RADIUS * 2);
+        if (kaboom.type == COLLISION_EVENT_TYPE_CHARACTER) {
+            kill_character(character->player_controlled, kaboom.character, true);
+        }
+    }
+}
+
 void shoot_x_bullet(Character *character);
 void shoot_y_bullet(Character *character);
 void shoot_xy_bullet(Character *character);
@@ -701,6 +750,9 @@ InputProfile process_player(Character *character) {
                 right.character->physx.y_vel -= DASHER_FLING_Y_DISTANCE;
                 kill_character(true, right.character, true);
             }
+        } else if (character->type == CHARACTER_TYPE_BOMBER) {
+            blow_up(character);
+            kill_character(false, character, false);
         }
     }
 
@@ -948,6 +1000,21 @@ InputProfile pre_process_ai(Character *character) {
             else
                 shoot_xy_bullet(character);
             character->wants_to_action = false;
+        }
+    } else if (character->type == CHARACTER_TYPE_BOMBER) {
+        if (gFrameCounter % ACTION_CHANCE_FREQUENCY[character->type] == 0 &&
+            oct_Random(0, 1) > ACTION_CHANCE[character->type] &&
+            kinda_touching_ground &&
+            character->action_timer <= ACTION_COOLDOWNS[character->type] &&
+            character->physx.y + character->physx.bb_height > 3 * 16) {
+
+            character->wants_to_action = true;
+            character->action_timer = ACTION_TELEGRAPH_TIMES[character->type];
+        }
+
+        if (character->wants_to_action && character->action_timer <= 0) {
+            blow_up(character);
+            kill_character(false, character, true);
         }
     } else if (character->type == CHARACTER_TYPE_DASHER) {
         // dasher is always pissed
@@ -1249,7 +1316,7 @@ void game_begin() {
 
     // Add the player
     state.player = add_character(&(Character){
-        .type = CHARACTER_TYPE_DASHER,
+        .type = CHARACTER_TYPE_BOMBER,
         .player_controlled = true,
         .physx = {
                 .x = 15.5 * 16,

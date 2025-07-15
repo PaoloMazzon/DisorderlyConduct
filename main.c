@@ -53,13 +53,13 @@ const float GAME_HEIGHT = LEVEL_HEIGHT * 16;
 // how long the player has to live in these bodies
 const float CHARACTER_TYPE_LIFESPANS[] = {
         0, // CHARACTER_TYPE_INVALID,
-        15, // CHARACTER_TYPE_JUMPER,
-        10, // CHARACTER_TYPE_X_SHOOTER,
-        20, // CHARACTER_TYPE_Y_SHOOTER,
-        10, // CHARACTER_TYPE_XY_SHOOTER,
-        8, // CHARACTER_TYPE_SWORDSMITH,
-        3, // CHARACTER_TYPE_LASER,
-        3, // CHARACTER_TYPE_DASHER,
+        30, // CHARACTER_TYPE_JUMPER,
+        35, // CHARACTER_TYPE_Y_SHOOTER,
+        18, // CHARACTER_TYPE_X_SHOOTER,
+        25, // CHARACTER_TYPE_XY_SHOOTER,
+        15, // CHARACTER_TYPE_BOMBER,
+        10, // CHARACTER_TYPE_LASER,
+        15, // CHARACTER_TYPE_DASHER,
 };
 
 // acceleration values for the ai, player uses this * a constant as well
@@ -69,7 +69,7 @@ const float ACCELERATION_VALUES[] = {
         0.08, // CHARACTER_TYPE_X_SHOOTER,
         0.25, // CHARACTER_TYPE_Y_SHOOTER, this guy gotta haul ass
         0.08, // CHARACTER_TYPE_XY_SHOOTER,
-        0.2, // CHARACTER_TYPE_SWORDSMITH,
+        0.20, // CHARACTER_TYPE_BOMBER,
         0.08, // CHARACTER_TYPE_LASER,
         0.20, // CHARACTER_TYPE_DASHER,
 };
@@ -77,37 +77,37 @@ const float ACCELERATION_VALUES[] = {
 // how long after taking an action an ai is allowed to take it again
 const float ACTION_COOLDOWNS[] = {
         0, // CHARACTER_TYPE_INVALID,
-        0.8, // CHARACTER_TYPE_JUMPER,
-        1, // CHARACTER_TYPE_X_SHOOTER,
-        1, // CHARACTER_TYPE_Y_SHOOTER,
+        1.2, // CHARACTER_TYPE_JUMPER, -- only ai
+        1.2, // CHARACTER_TYPE_X_SHOOTER,
+        1.0, // CHARACTER_TYPE_Y_SHOOTER,
         0.5, // CHARACTER_TYPE_XY_SHOOTER,
-        0, // CHARACTER_TYPE_SWORDSMITH,
-        3, // CHARACTER_TYPE_LASER,
-        3, // CHARACTER_TYPE_DASHER,
+        0.0, // CHARACTER_TYPE_BOMBER,
+        2.0, // CHARACTER_TYPE_LASER,
+        3.0, // CHARACTER_TYPE_DASHER,
 };
 
 // how long an ai has to telegraph an action
 const float ACTION_TELEGRAPH_TIMES[] = {
         0, // CHARACTER_TYPE_INVALID,
-        0.2, // CHARACTER_TYPE_JUMPER,
-        0.5, // CHARACTER_TYPE_X_SHOOTER,
-        0.3, // CHARACTER_TYPE_Y_SHOOTER,
-        0.1, // CHARACTER_TYPE_XY_SHOOTER,
-        1, // CHARACTER_TYPE_SWORDSMITH,
-        1, // CHARACTER_TYPE_LASER,
-        0, // CHARACTER_TYPE_DASHER,
+        0.3, // CHARACTER_TYPE_JUMPER,
+        0.6, // CHARACTER_TYPE_X_SHOOTER,
+        0.4, // CHARACTER_TYPE_Y_SHOOTER,
+        0.3, // CHARACTER_TYPE_XY_SHOOTER,
+        1.0, // CHARACTER_TYPE_BOMBER,
+        0.8, // CHARACTER_TYPE_LASER,
+        0.0, // CHARACTER_TYPE_DASHER,
 };
 
 // chance on each potential action frame ai will do something
 const float ACTION_CHANCE[] = {
         0, // CHARACTER_TYPE_INVALID,
         0.4, // CHARACTER_TYPE_JUMPER,
-        0.5, // CHARACTER_TYPE_X_SHOOTER,
+        0.3, // CHARACTER_TYPE_X_SHOOTER,
         0.5, // CHARACTER_TYPE_Y_SHOOTER,
-        0.5, // CHARACTER_TYPE_XY_SHOOTER,
-        0.5, // CHARACTER_TYPE_SWORDSMITH,
+        0.9, // CHARACTER_TYPE_XY_SHOOTER,
+        0.2, // CHARACTER_TYPE_BOMBER,
         0.5, // CHARACTER_TYPE_LASER,
-        1, // CHARACTER_TYPE_DASHER,
+        1.0, // CHARACTER_TYPE_DASHER,
 };
 
 // every x frames the above chances are rolled
@@ -117,7 +117,7 @@ const int ACTION_CHANCE_FREQUENCY[] = {
         6, // CHARACTER_TYPE_X_SHOOTER,
         7, // CHARACTER_TYPE_Y_SHOOTER,
         8, // CHARACTER_TYPE_XY_SHOOTER,
-        9, // CHARACTER_TYPE_SWORDSMITH,
+        4, // CHARACTER_TYPE_BOMBER,
         10, // CHARACTER_TYPE_LASER,
         1, // CHARACTER_TYPE_DASHER,
 };
@@ -129,7 +129,7 @@ const int ADDITIONAL_SCORE[] = {
         6, // CHARACTER_TYPE_X_SHOOTER,
         7, // CHARACTER_TYPE_Y_SHOOTER,
         8, // CHARACTER_TYPE_XY_SHOOTER,
-        9, // CHARACTER_TYPE_SWORDSMITH,
+        15, // CHARACTER_TYPE_BOMBER,
         10, // CHARACTER_TYPE_LASER,
         10, // CHARACTER_TYPE_DASHER,
 };
@@ -183,6 +183,7 @@ const char *SAVE_NAME = "save.json";
 ///////////////////////// STRUCTS /////////////////////////
 typedef struct Save_t {
     float highscore;
+    bool has_done_tutorial;
 
     // probably later idk
     int32_t server_ipv4;
@@ -308,6 +309,7 @@ typedef struct GameState_t {
     int32_t frame_count;
     int32_t game_phase;
 
+    bool in_tutorial;
     Oct_SpriteInstance fire;
     float score; // literally just 1 per frame
 
@@ -1011,7 +1013,7 @@ InputProfile pre_process_ai(Character *character) {
     // Jumpers might jump every now and again
     if (character->type == CHARACTER_TYPE_JUMPER) {
         if (gFrameCounter % ACTION_CHANCE_FREQUENCY[character->type] == 0 &&
-            oct_Random(0, 1) > ACTION_CHANCE[character->type] &&
+            oct_Random(0, 1) < ACTION_CHANCE[character->type] &&
             kinda_touching_ground &&
             character->action_timer <= ACTION_COOLDOWNS[character->type] &&
             character->physx.y + character->physx.bb_height > 3 * 16) {
@@ -1026,7 +1028,7 @@ InputProfile pre_process_ai(Character *character) {
         }
     } else if (character->type == CHARACTER_TYPE_X_SHOOTER || character->type == CHARACTER_TYPE_Y_SHOOTER || character->type == CHARACTER_TYPE_XY_SHOOTER) {
         if (gFrameCounter % ACTION_CHANCE_FREQUENCY[character->type] == 0 &&
-            oct_Random(0, 1) > ACTION_CHANCE[character->type] &&
+            oct_Random(0, 1) < ACTION_CHANCE[character->type] &&
             kinda_touching_ground &&
             character->action_timer <= ACTION_COOLDOWNS[character->type] &&
             character->physx.y + character->physx.bb_height > 3 * 16) {
@@ -1046,7 +1048,7 @@ InputProfile pre_process_ai(Character *character) {
         }
     } else if (character->type == CHARACTER_TYPE_LASER) {
         if (gFrameCounter % ACTION_CHANCE_FREQUENCY[character->type] == 0 &&
-            oct_Random(0, 1) > ACTION_CHANCE[character->type] &&
+            oct_Random(0, 1) < ACTION_CHANCE[character->type] &&
             kinda_touching_ground &&
             character->action_timer <= ACTION_COOLDOWNS[character->type] &&
             character->physx.y + character->physx.bb_height > 3 * 16) {
@@ -1061,7 +1063,7 @@ InputProfile pre_process_ai(Character *character) {
         }
     } else if (character->type == CHARACTER_TYPE_BOMBER) {
         if (gFrameCounter % ACTION_CHANCE_FREQUENCY[character->type] == 0 &&
-            oct_Random(0, 1) > ACTION_CHANCE[character->type] &&
+            oct_Random(0, 1) < ACTION_CHANCE[character->type] &&
             kinda_touching_ground &&
             character->action_timer <= ACTION_COOLDOWNS[character->type] &&
             character->physx.y + character->physx.bb_height > 3 * 16) {
@@ -1372,6 +1374,11 @@ void game_begin() {
     }
     cJSON_Delete(json);
 
+    Save s = parse_save();
+    state.in_tutorial = !s.has_done_tutorial;
+    s.has_done_tutorial = true;
+    save_game(&s);
+
     // Add the player
     state.player = add_character(&(Character){
         .type = CHARACTER_TYPE_LASER,
@@ -1383,9 +1390,83 @@ void game_begin() {
     });
     state.lifespan = PLAYER_STARTING_LIFESPAN;
     state.max_lifespan = PLAYER_STARTING_LIFESPAN;
+}
 
-    // Add test dude
-    add_ai(CHARACTER_TYPE_JUMPER);
+float str_count(const char *s, char c) {
+    float count = 0;
+    while (*s) {
+        if (*s == c) count += 1;
+        s++;
+    }
+    return count;
+}
+
+// fuck you
+float longest_len(const char *s, char c) {
+    float count = 0;
+    float big = 0;
+    while (*s) {
+        count += 1;
+        if (*s == c) {
+            if (count > big) big = count;
+            count = 0;
+        }
+        s++;
+    }
+    if (count > big) big = count;
+    return big - 1;
+}
+
+void draw_text_box(float x, float y, const char *txt) {
+    const float size_x = longest_len(txt, '\n') * 7;
+    const float size_y = 11 + (11 * str_count(txt, '\n'));
+
+    oct_DrawRectangleColour(
+            &(Oct_Colour){0, 0, 0, 1},
+            &(Oct_Rectangle){
+                .size = {size_x + 2, size_y + 5},
+                .position = {x - 1 - (size_x / 2), y - 1 - (size_y / 2)}
+            },
+            true, 1);
+    oct_DrawText(
+            oct_GetAsset(gBundle, "fnt_monogram"),
+            (Oct_Vec2){roundf(x - (size_x / 2)), roundf(y - (size_y / 2))},
+            1,
+            "%s", txt);
+}
+
+void handle_tutorial() {
+    if (!state.in_tutorial) return;
+    if (state.total_time >= 45) state.in_tutorial = false;
+
+    /*
+     * order is as follows:
+     *  - welcome to game
+     *  - press arrow keys to move and space to interact
+     *  - you only have this much time here before you die
+     *  - take over dead bodies by filling the kill gauge
+     *  - stay alive
+     * */
+
+    if (state.total_time < 10) {
+        draw_text_box(GAME_WIDTH / 2, GAME_HEIGHT / 2, "Welcome to the game!\nTake some time to learn the controls.");
+    } else if (state.total_time < 20) {
+        draw_text_box(GAME_WIDTH / 2, GAME_HEIGHT / 2, "Press arrow keys to move\nand space to use your action.\nYour action depends on the body\nyou inhabit.");
+    } else if (state.total_time < 30) {
+        draw_text_box(GAME_WIDTH / 2, 64, "You will die when the time\nin this bar runs out.\nTake over bodies to get more time.");
+        oct_DrawTextureInt(
+                OCT_INTERPOLATE_ALL, 8,
+                oct_GetAsset(gBundle, "textures/pointer.png"),
+                (Oct_Vec2){140 + (sin(oct_Time() * 2) * 10), 24});
+    } else if (state.total_time < 40) {
+        draw_text_box(GAME_WIDTH / 2, 80, "Take over bodies by filling up\nthis kill gauge.");
+        oct_DrawTextureInt(
+                OCT_INTERPOLATE_ALL, 8,
+                oct_GetAsset(gBundle, "textures/pointer.png"),
+                (Oct_Vec2){155 + (sin(oct_Time() * 2) * 10), 40});
+    } else if (state.total_time < 45) {
+        draw_text_box(GAME_WIDTH / 2, GAME_HEIGHT / 2, "Have fun!");
+    }
 }
 
 void draw_time_bar() {
@@ -1414,6 +1495,23 @@ void draw_time_bar() {
             }
     };
     oct_Draw(&cmd);
+}
+
+void draw_time_alert() {
+    // 160,80
+    const float x = (GAME_WIDTH / 2);
+    const float y = (GAME_HEIGHT / 2);
+
+    if (state.lifespan < 5 && !state.player_died) {
+        const float scale = (sin(oct_Time() * 2) + 1.8) * 0.3;
+        const float rotation = cos(oct_Time() * 2.5) * 0.3;
+        oct_DrawTextureIntExt(
+                OCT_INTERPOLATE_ALL, 7,
+                oct_GetAsset(gBundle, "textures/danger.png"),
+                (Oct_Vec2){x, y},
+                (Oct_Vec2){scale, scale},
+                rotation, (Oct_Vec2){OCT_ORIGIN_MIDDLE, OCT_ORIGIN_MIDDLE});
+    }
 }
 
 void draw_kill_bar() {
@@ -1641,21 +1739,26 @@ GameStatus game_update() {
         process_projectile(&state.projectiles[i]);
     }
 
-    // player :skull: if out of time
-    state.lifespan -= 1.0 / 30.0;
-    if (state.lifespan <= 0 && !state.player_died) {
-        kill_character(false, state.player, false);
-    }
-
     draw_player_death_screen();
     draw_time_bar();
     draw_kill_bar();
+    draw_time_alert();
+    handle_tutorial();
 
+    // things that only happen if no tutorial
     state.total_time += 1.0 / 30.0;
-    if (!state.player_died)
-        state.score += 1 + state.game_phase;
+    if (!state.in_tutorial) {
+        // player :skull: if out of time
+        state.lifespan -= 1.0 / 30.0;
+        if (state.lifespan <= 0 && !state.player_died) {
+            kill_character(false, state.player, false);
+        }
 
-    handle_enemy_spawns();
+        if (!state.player_died)
+            state.score += 1 + state.game_phase;
+
+        handle_enemy_spawns();
+    }
 
     // particles on top for some fucking reason
     for (int i = 0; i < MAX_PARTICLES; i++) {
@@ -1694,8 +1797,8 @@ void menu_end() {
 
 ///////////////////////// MAIN /////////////////////////
 
+// parses save file, returning reasonable defaults if it doesnt exist 
 Save parse_save() {
-    // Open json with save
     uint32_t size;
     uint8_t *data = oct_ReadFile(SAVE_NAME, gAllocator, &size);
 
@@ -1706,8 +1809,10 @@ Save parse_save() {
             float score = cJSON_GetNumberValue(cJSON_GetObjectItem(json, "highscore"));
             if (!cJSON_IsNumber(cJSON_GetObjectItem(json, "highscore")))
                 score = 0;
+            float has_done_tutorial = cJSON_IsTrue(cJSON_GetObjectItem(json, "done_tutorial"));
             Save save = {
-                    .highscore = score
+                    .highscore = score,
+                    .has_done_tutorial = has_done_tutorial
             };
             cJSON_Delete(json);
             oct_Free(gAllocator, data);
@@ -1724,6 +1829,7 @@ Save parse_save() {
 void save_game(Save *save) {
     cJSON *json = cJSON_CreateObject();
     cJSON_AddNumberToObject(json, "highscore", save->highscore);
+    cJSON_AddBoolToObject(json, "done_tutorial", save->has_done_tutorial);
     // todo add ip shit eventually
     char * s = cJSON_Print(json);
     oct_WriteFile(SAVE_NAME, s, strlen(s));

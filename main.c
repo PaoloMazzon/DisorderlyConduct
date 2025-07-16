@@ -4,6 +4,7 @@
 #include <math.h>
 #include <oct/cJSON.h>
 #include <string.h>
+#include <stdio.h>
 
 ///////////////////////// ENUMS /////////////////////////
 typedef enum {
@@ -95,13 +96,13 @@ const float GAME_HEIGHT = LEVEL_HEIGHT * 16;
 // how long the player has to live in these bodies
 const float CHARACTER_TYPE_LIFESPANS[] = {
         0, // CHARACTER_TYPE_INVALID,
-        30, // CHARACTER_TYPE_JUMPER,
-        35, // CHARACTER_TYPE_Y_SHOOTER,
-        18, // CHARACTER_TYPE_X_SHOOTER,
-        25, // CHARACTER_TYPE_XY_SHOOTER,
-        15, // CHARACTER_TYPE_BOMBER,
-        10, // CHARACTER_TYPE_LASER,
-        15, // CHARACTER_TYPE_DASHER,
+        40, // CHARACTER_TYPE_JUMPER,
+        40, // CHARACTER_TYPE_Y_SHOOTER,
+        30, // CHARACTER_TYPE_X_SHOOTER,
+        30, // CHARACTER_TYPE_XY_SHOOTER,
+        30, // CHARACTER_TYPE_BOMBER,
+        15, // CHARACTER_TYPE_LASER,
+        25, // CHARACTER_TYPE_DASHER,
 };
 
 // acceleration values for the ai, player uses this * a constant as well
@@ -178,10 +179,10 @@ const int ADDITIONAL_SCORE[] = {
 
 const int32_t GAME_PHASES = 8;
 const int32_t SPAWN_FREQUENCIES[] = { // in frames
-        100,
-        90,
         80,
+        75,
         70,
+        65,
         60,
         50,
         40,
@@ -228,8 +229,8 @@ const int32_t PLAY_MENU_SIZE = 4;
 #define MAX_PROJECTILES 100
 #define MAX_PARTICLES 1000
 #define MAX_PHYSICS_OBJECTS (MAX_CHARACTERS + MAX_PROJECTILES) // particles noclip
-const float GROUND_FRICTION = 0.05;
-const float AIR_FRICTION = 0.01;
+const float GROUND_FRICTION = 0.06;
+const float AIR_FRICTION = 0.02;
 const float GRAVITY = 0.5;
 const float BOUNCE_PRESERVED_BOUNCE_WALL = 0.50; // how much velocity is preserved when rebounding off walls
 const float BOUNCE_PRESERVED = 0.20; // how much velocity is preserved when rebounding off walls
@@ -238,7 +239,7 @@ const float PLAYER_JUMP_SPEED = 7;
 const float JUMPER_DESCEND_SPEED = 3; // how fast the player can descend as jumper
 const float PARTICLES_GROUND_IMPACT_SPEED = 6;
 const float SPEED_LIMIT = 12;
-const float PLAYER_STARTING_LIFESPAN = 30; // seconds;
+const float PLAYER_STARTING_LIFESPAN = 60; // seconds;
 const int32_t START_REQ_KILLS = 3;
 const float ENEMY_FLING_SPEED = 5;
 const int32_t PLAYER_I_FRAMES = 30;
@@ -388,6 +389,7 @@ typedef struct MenuState_t {
     const char *drop_text;
     float fade_in;
     float fade_out;
+    float highscore;
 } MenuState;
 
 MenuState menu_state;
@@ -1454,8 +1456,9 @@ void game_begin() {
     oct_InitSpriteInstance(&state.fire, oct_GetAsset(gBundle, "sprites/fire.json"), true);
 
     // Open json with level
+    const char *maps[] = {"data/map1.tmj", "data/map2.tmj", "data/map3.tmj"};
     uint32_t size;
-    uint8_t *data = oct_ReadFile("data/map1.tmj", gAllocator, &size);
+    uint8_t *data = oct_ReadFile(maps[menu_state.map], gAllocator, &size);
     cJSON *json = cJSON_ParseWithLength((void *)data, size);
     if (!data || !json)
         oct_Raise(OCT_STATUS_FILE_DOES_NOT_EXIST, true, "no level file womp womp");
@@ -1827,7 +1830,12 @@ void draw_player_death_screen() {
 }
 
 GameStatus game_update() {
-    oct_DrawTexture(oct_GetAsset(gBundle, "textures/bg1.png"), (Oct_Vec2){0, 0});
+    Oct_Texture texs[] = {
+            oct_GetAsset(gBundle, "textures/bg1.png"),
+            oct_GetAsset(gBundle, "textures/bg2.png"),
+            oct_GetAsset(gBundle, "textures/bg3.png")
+    };
+    oct_DrawTexture(texs[menu_state.map], (Oct_Vec2){0, 0});
 
     oct_TilemapDraw(state.level_map);
 
@@ -2164,6 +2172,8 @@ void menu_begin() {
             oct_GetAsset(gBundle, "sounds/stoneshort.wav"),
             (Oct_Vec2){1 * gSoundVolume, 1 * gSoundVolume},
             false);
+    Save s = parse_save();
+    menu_state.highscore = s.highscore;
 }
 
 GameStatus menu_update() {
@@ -2242,6 +2252,25 @@ GameStatus menu_update() {
             return GAME_STATUS_PLAY_GAME;
         }
     }
+
+    // draw highscore
+    char buf[100] = {0};
+    snprintf(buf, 99, " Highscore: %i", (int)menu_state.highscore);
+    const float size_x = longest_len(buf, '\n') * 7;
+    const float size_y = 11 + (11 * str_count(buf, '\n'));
+
+    oct_DrawRectangleColour(
+            &(Oct_Colour){0, 0, 0, 1},
+            &(Oct_Rectangle){
+                    .size = {size_x + 2, size_y + 5},
+                    .position = {(GAME_WIDTH / 2) - 1 - (size_x / 2), (GAME_HEIGHT - 24) - 1 - (size_y / 2)}
+            },
+            true, 1);
+    oct_DrawText(
+            oct_GetAsset(gBundle, "fnt_monogram"),
+            (Oct_Vec2){roundf((GAME_WIDTH / 2) - (size_x / 2)), roundf((GAME_HEIGHT - 24) - (size_y / 2))},
+            1,
+            "%s", buf);
 
     if (menu_state.start_game) return GAME_STATUS_PLAY_GAME;
     if (menu_state.quit) return GAME_STATUS_QUIT;

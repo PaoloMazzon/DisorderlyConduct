@@ -2059,6 +2059,7 @@ void handle_settings() {
             Save s = parse_save();
             s.music_volume = s.music_volume != 0 ? 0 : 1;
             save_game(&s);
+            gMusicVolume = s.music_volume;
             if (s.music_volume == 0)
                 show_confirmation("music = 0 ");
             else
@@ -2066,6 +2067,7 @@ void handle_settings() {
         } else if (menu_state.cursor == 2)  { // Toggle sound
             Save s = parse_save();
             s.sound_volume = s.sound_volume != 0 ? 0 : 1;
+            gSoundVolume = s.sound_volume;
             save_game(&s);
             if (s.sound_volume == 0)
                 show_confirmation("sound = 0 ");
@@ -2321,7 +2323,12 @@ Save parse_save() {
             oct_Raise(OCT_STATUS_ERROR, false, "save file is cooked");
         }
     }
-    return (Save){0};
+    return (Save){
+        .pixel_perfect = false,
+        .fullscreen = false,
+        .music_volume = 1,
+        .sound_volume = 1,
+    };
 }
 
 void save_game(Save *save) {

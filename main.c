@@ -255,6 +255,7 @@ const float DASHER_FLING_Y_DISTANCE = 10;
 const float DASHER_FLING_X_DISTANCE = 10;
 const float BOMBER_BLAST_RADIUS = 64;
 const int32_t MOUTH_OPEN_DURATION = 8;
+const float FADE_IN_OUT_TIME = 1 * 30;
 const char *SAVE_NAME = "save.json";
 
 ///////////////////////// STRUCTS /////////////////////////
@@ -385,6 +386,8 @@ typedef struct MenuState_t {
     float cursor_height;
     int32_t starting_text_box_frame;
     const char *drop_text;
+    float fade_in;
+    float fade_out;
 } MenuState;
 
 MenuState menu_state;
@@ -411,6 +414,8 @@ typedef struct GameState_t {
     Oct_SpriteInstance fire;
     float shown_clock_percent;
     float score; // literally just 1 per frame
+    float fade_in;
+    float fade_out;
 
     Oct_Tilemap level_map;
     Character characters[MAX_CHARACTERS];
@@ -1047,7 +1052,7 @@ void kill_character(bool player_is_the_killer, Character *character, bool dramat
         if (!state.player_died) {
             state.score += ADDITIONAL_SCORE[character->type];
         }
-    } else if (state.player_iframes <= 0 && !state.player_died) {
+    } else if (state.player_iframes <= 0 && !state.player_died && !state.in_tutorial) {
         state.player_iframes = PLAYER_I_FRAMES;
         if (state.lifespan <= 0) {
             oct_PlaySound(
@@ -1489,6 +1494,7 @@ void game_begin() {
     });
     state.lifespan = PLAYER_STARTING_LIFESPAN;
     state.max_lifespan = PLAYER_STARTING_LIFESPAN;
+    state.fade_in = FADE_IN_OUT_TIME;
 }
 
 float str_count(const char *s, char c) {
@@ -1879,9 +1885,38 @@ GameStatus game_update() {
     oct_WaitJobs();
 
 
+    // quit when player rip
+    if (oct_KeyPressed(OCT_KEY_SPACE) && state.player_died && state.fade_out < 0) {
+        state.fade_out = FADE_IN_OUT_TIME;
+        oct_PlaySound(
+                oct_GetAsset(gBundle, "sounds/stonelong.wav"),
+                (Oct_Vec2){1 * gSoundVolume, 1 * gSoundVolume},
+                false);
+    }
+
     // debug
     if (oct_KeyDown(OCT_KEY_F)) {
         return GAME_STATUS_MENU;
+    }
+
+    state.fade_in -= 1;
+    state.fade_out -= 1;
+    if (state.fade_in > 0) {
+        const float percent = oct_Sirp(1, 0, state.fade_in / FADE_IN_OUT_TIME);
+        oct_DrawTextureInt(
+                OCT_INTERPOLATE_ALL, 74,
+                oct_GetAsset(gBundle, "textures/curtains.png"),
+                (Oct_Vec2){GAME_WIDTH * percent, 0});
+    }
+    if (state.fade_out > 0) {
+        const float percent = oct_Sirp(0, 1, state.fade_out / FADE_IN_OUT_TIME);
+        oct_DrawTextureInt(
+                OCT_INTERPOLATE_ALL, 74,
+                oct_GetAsset(gBundle, "textures/curtains.png"),
+                (Oct_Vec2){GAME_WIDTH * percent, 0});
+        if (state.fade_out <= 1) {
+            return GAME_STATUS_MENU;
+        }
     }
 
     return GAME_STATUS_PLAY_GAME;
@@ -2078,8 +2113,12 @@ void handle_play() {
                 (Oct_Vec2){0.8 * gSoundVolume, 0.8 * gSoundVolume},
                 false);
 
-        if (menu_state.cursor == 0)  { // play
-            menu_state.start_game = true;
+        if (menu_state.cursor == 0 && menu_state.fade_out < 0)  { // play
+            menu_state.fade_out = FADE_IN_OUT_TIME;
+            oct_PlaySound(
+                    oct_GetAsset(gBundle, "sounds/stonelong.wav"),
+                    (Oct_Vec2){1 * gSoundVolume, 1 * gSoundVolume},
+                    false);
         } else if (menu_state.cursor == 1)  { // swap body
             menu_state.character = (menu_state.character + 1) % STARTING_BODY_MAX;
         } else if (menu_state.cursor == 2)  { // swap map
@@ -2120,6 +2159,11 @@ void handle_play() {
 
 void menu_begin() {
     memset(&menu_state, 0, sizeof(struct MenuState_t));
+    menu_state.fade_in = FADE_IN_OUT_TIME;
+    oct_PlaySound(
+            oct_GetAsset(gBundle, "sounds/stoneshort.wav"),
+            (Oct_Vec2){1 * gSoundVolume, 1 * gSoundVolume},
+            false);
 }
 
 GameStatus menu_update() {
@@ -2174,6 +2218,30 @@ GameStatus menu_update() {
             (Oct_Vec2){GAME_WIDTH / 2 - 30, 40},
             (Oct_Vec2){1, 1},
             0, (Oct_Vec2){OCT_ORIGIN_MIDDLE, OCT_ORIGIN_MIDDLE});
+
+    oct_DrawTexture(
+            oct_GetAsset(gBundle, "textures/controls.png"),
+            (Oct_Vec2){445, 235});
+
+    menu_state.fade_in -= 1;
+    menu_state.fade_out -= 1;
+    if (menu_state.fade_in > 0) {
+        const float percent = oct_Sirp(1, 0, menu_state.fade_in / FADE_IN_OUT_TIME);
+        oct_DrawTextureInt(
+                OCT_INTERPOLATE_ALL, 74,
+                oct_GetAsset(gBundle, "textures/curtains.png"),
+                (Oct_Vec2){GAME_WIDTH * percent, 0});
+    }
+    if (menu_state.fade_out > 0) {
+        const float percent = oct_Sirp(0, 1, menu_state.fade_out / FADE_IN_OUT_TIME);
+        oct_DrawTextureInt(
+                OCT_INTERPOLATE_ALL, 74,
+                oct_GetAsset(gBundle, "textures/curtains.png"),
+                (Oct_Vec2){GAME_WIDTH * percent, 0});
+        if (menu_state.fade_out == 1) {
+            return GAME_STATUS_PLAY_GAME;
+        }
+    }
 
     if (menu_state.start_game) return GAME_STATUS_PLAY_GAME;
     if (menu_state.quit) return GAME_STATUS_QUIT;

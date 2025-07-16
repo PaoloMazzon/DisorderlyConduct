@@ -145,7 +145,16 @@ const int32_t SPAWN_FREQUENCIES[] = { // in frames
         40,
         30,
 };
-const int32_t TIME_BETWEEN_PHASES = 30 * 15;
+const int32_t TIME_BETWEEN_PHASES[] = {
+        30 * 30,
+        30 * 20,
+        30 * 20,
+        30 * 20,
+        30 * 20,
+        30 * 20,
+        30 * 20,
+        30 * 20, // doesnt matter, its infinite
+};
 
 #define MAX_CHARACTERS 100
 #define MAX_PROJECTILES 100
@@ -311,6 +320,7 @@ typedef struct GameState_t {
 
     bool in_tutorial;
     Oct_SpriteInstance fire;
+    float shown_clock_percent;
     float score; // literally just 1 per frame
 
     Oct_Tilemap level_map;
@@ -1381,7 +1391,7 @@ void game_begin() {
 
     // Add the player
     state.player = add_character(&(Character){
-        .type = CHARACTER_TYPE_LASER,
+        .type = CHARACTER_TYPE_JUMPER,
         .player_controlled = true,
         .physx = {
                 .x = 15.5 * 16,
@@ -1453,17 +1463,17 @@ void handle_tutorial() {
     } else if (state.total_time < 20) {
         draw_text_box(GAME_WIDTH / 2, GAME_HEIGHT / 2, "Press arrow keys to move\nand space to use your action.\nYour action depends on the body\nyou inhabit.");
     } else if (state.total_time < 30) {
-        draw_text_box(GAME_WIDTH / 2, 64, "You will die when the time\nin this bar runs out.\nTake over bodies to get more time.");
+        draw_text_box(GAME_WIDTH / 2, 64, "You will die when this time runs out.\nTake over bodies to get more time.");
         oct_DrawTextureInt(
                 OCT_INTERPOLATE_ALL, 8,
                 oct_GetAsset(gBundle, "textures/pointer.png"),
-                (Oct_Vec2){140 + (sin(oct_Time() * 2) * 10), 24});
+                (Oct_Vec2){160 + (sin(oct_Time() * 2) * 10), 24});
     } else if (state.total_time < 40) {
-        draw_text_box(GAME_WIDTH / 2, 80, "Take over bodies by filling up\nthis kill gauge.");
+        draw_text_box(GAME_WIDTH / 2, 100, "Take over bodies by filling up\nthis kill gauge.");
         oct_DrawTextureInt(
                 OCT_INTERPOLATE_ALL, 8,
                 oct_GetAsset(gBundle, "textures/pointer.png"),
-                (Oct_Vec2){155 + (sin(oct_Time() * 2) * 10), 40});
+                (Oct_Vec2){155 + (sin(oct_Time() * 2) * 10), 58});
     } else if (state.total_time < 45) {
         draw_text_box(GAME_WIDTH / 2, GAME_HEIGHT / 2, "Have fun!");
     }
@@ -1471,30 +1481,61 @@ void handle_tutorial() {
 
 void draw_time_bar() {
     const float percent = oct_Clamp(0, 1, state.lifespan / state.max_lifespan);
-    const float x = (GAME_WIDTH / 2) - (112 / 2);
-    const float y = 16;
-    oct_DrawTexture(
-            oct_GetAsset(gBundle, "textures/timebarempty.png"),
-            (Oct_Vec2){x, y}
-    );
-    Oct_DrawCommand cmd = {
-            .type = OCT_DRAW_COMMAND_TYPE_TEXTURE,
-            .interpolate = OCT_INTERPOLATE_ALL,
-            .id = 420,
-            .colour = {1, 1, 1, 1},
-            .Texture = {
-                    .texture = oct_GetAsset(gBundle, "textures/timebar.png"),
-                    .viewport = (Oct_Rectangle){
-                            .position = {0, 0},
-                            .size = {112 * percent, 32},
-                    },
-                    .position = {x, y},
-                    .scale = {1, 1},
-                    .origin = {0, 0},
-                    .rotation = 0,
-            }
-    };
-    oct_Draw(&cmd);
+    const float clock_x = 232;
+    const float clock_y = 17 - 3;
+    const float clock_hand_x = 255;
+    const float clock_hand_y = 40 - 3;
+
+    if (state.player_iframes > 0) {
+        oct_DrawTextureColour(
+                oct_GetAsset(gBundle, "textures/clock.png"),
+                &(Oct_Colour){1, 0.5, 0.5, 1},
+                (Oct_Vec2){clock_x, clock_y}
+        );
+    } else {
+        oct_DrawTexture(
+                oct_GetAsset(gBundle, "textures/clock.png"),
+                (Oct_Vec2){clock_x, clock_y}
+        );
+    }
+
+    state.shown_clock_percent += (percent - state.shown_clock_percent) * 0.3;
+    oct_DrawTextureIntExt(
+            OCT_INTERPOLATE_ALL, 420,
+            oct_GetAsset(gBundle, "textures/clockhand.png"),
+            (Oct_Vec2){clock_hand_x, clock_hand_y},
+            (Oct_Vec2){1, 1},
+            -state.shown_clock_percent * M_PI * 2,
+            (Oct_Vec2){OCT_ORIGIN_MIDDLE, OCT_ORIGIN_MIDDLE});
+}
+
+void draw_score() {
+    const Oct_FontAtlas kingdom = oct_GetAsset(gBundle, "fnt_kingdom");
+    const float y = 2;
+    // If user is 1 kill away from transforming, tell them
+    if (state.req_kills -1 == state.current_kills && !state.player_died) {
+        Oct_Vec2 text_size;
+        const float scale = (sin(oct_Time() * 4) / 4) + 1;
+        oct_GetTextSize(kingdom, text_size, scale, "Transform!");
+        oct_DrawTextColour(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (text_size[0] / 2) + 1, y},
+                           &(Oct_Colour) {0, 0, 0, 1}, scale, "Transform!");
+        oct_DrawText(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (text_size[0] / 2), y}, scale, "Transform!");
+    } else {
+        if (state.player_died && state.got_highscore) {
+            const float scale = (sin(oct_Time() * 4) / 4) + 1;
+            Oct_Vec2 text_size;
+            oct_GetTextSize(kingdom, text_size, scale, "Score: %i", (int)state.score);
+            oct_DrawTextColour(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (text_size[0] / 2) + 1, y},
+                               &(Oct_Colour) {0, 0, 0, 1}, scale, "Score: %i", (int)state.score);
+            oct_DrawText(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (text_size[0] / 2), y}, scale, "Score: %i", (int)state.score);
+        } else {
+            Oct_Vec2 size;
+            oct_GetTextSize(kingdom, size, 1, "Score: %i", (int)state.score);
+            oct_DrawTextColour(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (size[0] / 2) + 1, y}, &(Oct_Colour) {0, 0, 0, 1},
+                               1, "Score: %i", (int)state.score);
+            oct_DrawText(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (size[0] / 2), y}, 1, "Score: %i", (int)state.score);
+        }
+    }
 }
 
 void draw_time_alert() {
@@ -1517,8 +1558,8 @@ void draw_time_alert() {
 void draw_kill_bar() {
     const float percent_kills = oct_Clamp(0, 1, (state.displayed_kills / ((float)state.req_kills - 1)));
     state.displayed_kills += (state.current_kills - state.displayed_kills) * 0.5;
-    const float x2 = (GAME_WIDTH / 2) - (92 / 2);
-    const float y2 = 48;
+    const float x2 = 210;
+    const float y2 = 56;
     oct_DrawTexture(
             oct_GetAsset(gBundle, "textures/killcountempty.png"),
             (Oct_Vec2){x2, y2}
@@ -1532,7 +1573,7 @@ void draw_kill_bar() {
                     .texture = oct_GetAsset(gBundle, "textures/killcount.png"),
                     .viewport = (Oct_Rectangle){
                             .position = {0, 0},
-                            .size = {92 * percent_kills, 10},
+                            .size = {92 * percent_kills, 16},
                     },
                     .position = {x2, y2},
                     .scale = {1, 1},
@@ -1541,33 +1582,6 @@ void draw_kill_bar() {
             }
     };
     oct_Draw(&cmd2);
-
-    const Oct_FontAtlas kingdom = oct_GetAsset(gBundle, "fnt_kingdom");
-    // If user is 1 kill away from transforming, tell them
-    if (state.req_kills -1 == state.current_kills && !state.player_died) {
-        Oct_Vec2 text_size;
-        const float scale = (sin(oct_Time() * 4) / 4) + 1;
-        oct_GetTextSize(kingdom, text_size, scale, "Transform!");
-        oct_DrawTextColour(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (text_size[0] / 2) + 1, 32 - (text_size[1] / 2) + 1},
-                           &(Oct_Colour) {0, 0, 0, 1}, scale, "Transform!");
-        oct_DrawText(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (text_size[0] / 2), 32 - (text_size[1] / 2)}, scale, "Transform!");
-    } else {
-        if (state.player_died && state.got_highscore) {
-            const float scale = (sin(oct_Time() * 4) / 4) + 1;
-            Oct_Vec2 text_size;
-            oct_GetTextSize(kingdom, text_size, scale, "Score: %i", (int)state.score);
-            oct_DrawTextColour(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (text_size[0] / 2) + 1, 32 - (text_size[1] / 2) + 1},
-                               &(Oct_Colour) {0, 0, 0, 1}, scale, "Score: %i", (int)state.score);
-            oct_DrawText(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (text_size[0] / 2), 32 - (text_size[1] / 2)}, scale, "Score: %i", (int)state.score);
-        } else {
-            // Draw total time
-            Oct_Vec2 size;
-            oct_GetTextSize(kingdom, size, 1, "Score: %i", (int)state.score);
-            oct_DrawTextColour(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (size[0] / 2) + 1, 22}, &(Oct_Colour) {0, 0, 0, 1},
-                               1, "Score: %i", (int)state.score);
-            oct_DrawText(kingdom, (Oct_Vec2) {(GAME_WIDTH / 2) - (size[0] / 2), 21}, 1, "Score: %i", (int)state.score);
-        }
-    }
 }
 
 int32_t same_chance(int32_t n){
@@ -1576,7 +1590,7 @@ int32_t same_chance(int32_t n){
 
 void handle_enemy_spawns() {
     state.frame_count++;
-    if (state.frame_count >= TIME_BETWEEN_PHASES && state.game_phase < GAME_PHASES - 1) {
+    if (state.game_phase < GAME_PHASES - 1 && state.frame_count >= TIME_BETWEEN_PHASES[state.game_phase]) {
         state.game_phase += 1;
         state.frame_count = 0;
     }
@@ -1740,8 +1754,9 @@ GameStatus game_update() {
     }
 
     draw_player_death_screen();
-    draw_time_bar();
     draw_kill_bar();
+    draw_time_bar();
+    draw_score();
     draw_time_alert();
     handle_tutorial();
 
@@ -1921,7 +1936,7 @@ int main(int argc, const char **argv) {
             .windowTitle = "Jam Game",
             .windowWidth = 1280,
             .windowHeight = 720,
-            .debug = true,
+            .debug = false,
     };
     oct_Init(&initInfo);
     return 0;

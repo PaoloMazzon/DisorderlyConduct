@@ -20,7 +20,7 @@ typedef enum {
 // For transitioning game states
 typedef enum {
     GAME_STATUS_PLAY_GAME, // play the game from menu
-    GAME_STATUS_END_GAME, // go back to menu
+    GAME_STATUS_MENU, // go back to menu
     GAME_STATUS_QUIT, // alt + f4
 } GameStatus;
 
@@ -32,13 +32,55 @@ typedef enum {
     COLLISION_EVENT_TYPE_PROJECTILE = 4,
 } CollisionEventType;
 
+typedef enum {
+    MENU_OPTION_PLAY, // go to play menu
+    MENU_OPTION_START_GAME, // start the game
+    MENU_OPTION_QUIT, // quit game
+    MENU_OPTION_BACK, // back to top menu
+    MENU_OPTION_SETTINGS, // go to settings
+    MENU_OPTION_LEADERBOARD, // go to leaderboard menu
+    MENU_OPTION_RESET_TUTORIAL, // sets the save file tutorial thing to false
+    MENU_OPTION_TOGGLE_MUSIC, // toggles music on/off
+    MENU_OPTION_TOGGLE_SOUND, // toggles sound on/off
+    MENU_OPTION_TOGGLE_FULLSCREEN, // toggles fullscreen on/off
+    MENU_OPTION_TOGGLE_PIXEL_PERFECT, // toggles pixel perfect scaling on/off
+    MENU_OPTION_START_JUMPER, // selects the jumper to be the starting character
+    MENU_OPTION_START_Y_SHOOTER, // selects the y shooter to be the starting character
+    MENU_OPTION_MAP_1, // start in map1
+    MENU_OPTION_MAP_2, // start in map2
+    MENU_OPTION_MAP_3, // start in map3
+} MenuOption;
+
+typedef enum {
+    MENU_INDEX_TOP = 0,
+    MENU_INDEX_PLAY = 1,
+    MENU_INDEX_SETTINGS = 2,
+    MENU_INDEX_LEADERBOARDS = 3,
+} MenuIndices;
+
+typedef enum {
+    STARTING_BODY_JUMPER = 0,
+    STARTING_BODY_Y_SHOOTER = 1,
+    STARTING_BODY_MAX = 2,
+} StartingBody;
+
+typedef enum {
+    STARTING_MAP_1 = 0,
+    STARTING_MAP_2 = 1,
+    STARTING_MAP_3 = 2,
+    STARTING_MAP_MAX = 3
+} StartingMap;
+
 ///////////////////////// GLOBALS /////////////////////////
 Oct_AssetBundle gBundle;
 Oct_Allocator gAllocator;
 Oct_Allocator gFrameAllocator; // arena for frame-time allocations
 Oct_Texture gBackBuffer;
-uint64_t gFrameCounter;
+uint64_t gFrameCounter = 9999;
 uint64_t gParticleIDs = 999999;
+float gSoundVolume = 1;
+float gMusicVolume = 1;
+bool gPixelPerfect;
 
 ///////////////////////// CONSTANTS /////////////////////////
 
@@ -156,6 +198,32 @@ const int32_t TIME_BETWEEN_PHASES[] = {
         30 * 20, // doesnt matter, its infinite
 };
 
+const char * TOP_LEVEL_MENU[] = {
+        "Play",
+        "Settings",
+        "Leaderboard",
+        "Quit"
+};
+const int32_t TOP_MENU_SIZE = 4;
+
+const char *OPTION_MENU[] = {
+        "Reset tutorial",
+        "Toggle music",
+        "Toggle sound",
+        "Toggle fullscreen",
+        "Toggle pixel-perfect",
+        "Back"
+};
+const int32_t OPTIONS_MENU_SIZE = 6;
+
+const char *PLAY_MENU[] = {
+        "Start Game",
+        "Swap Body",
+        "Swap Map",
+        "Back",
+};
+const int32_t PLAY_MENU_SIZE = 4;
+
 #define MAX_CHARACTERS 100
 #define MAX_PROJECTILES 100
 #define MAX_PARTICLES 1000
@@ -193,6 +261,10 @@ const char *SAVE_NAME = "save.json";
 typedef struct Save_t {
     float highscore;
     bool has_done_tutorial;
+    bool fullscreen;
+    bool pixel_perfect;
+    float sound_volume;
+    float music_volume;
 
     // probably later idk
     int32_t server_ipv4;
@@ -299,6 +371,23 @@ typedef struct CreateParticlesJob_t {
     Oct_Sprite spr;
     float lifetime; // seconds
 } CreateParticlesJob;
+
+typedef struct MenuState_t {
+    int32_t cursor;
+    bool quit;
+    bool start_game;
+    MenuIndices menu;
+    StartingMap map;
+    StartingBody character;
+    float cursor_x;
+    float cursor_y;
+    float cursor_width;
+    float cursor_height;
+    int32_t starting_text_box_frame;
+    const char *drop_text;
+} MenuState;
+
+MenuState menu_state;
 
 // LEAVE THIS AT THE BOTTOM
 typedef struct GameState_t {
@@ -507,7 +596,7 @@ bool process_physics(Character *this_c, Projectile *this_p, PhysicsObject *physx
         if (physx->x_vel > PARTICLES_GROUND_IMPACT_SPEED) {
             oct_PlaySound(
                     oct_GetAsset(gBundle, "sounds/bumpwall.wav"),
-                    (Oct_Vec2){0.2, 0.2},
+                    (Oct_Vec2){0.2 * gSoundVolume, 0.2 * gSoundVolume},
                     false);
         }
 
@@ -545,7 +634,7 @@ bool process_physics(Character *this_c, Projectile *this_p, PhysicsObject *physx
             });
             oct_PlaySound(
                     oct_GetAsset(gBundle, "sounds/bumpwall.wav"),
-                    (Oct_Vec2){0.2, 0.2},
+                    (Oct_Vec2){0.2 * gSoundVolume, 0.2 * gSoundVolume},
                     false);
         }
 
@@ -698,7 +787,7 @@ void kill_character(bool player_is_killer, Character *character, bool dramatic);
 void imma_firin_muh_lazor(Character *character) {
     oct_PlaySound(
             oct_GetAsset(gBundle, "sounds/laser.wav"),
-            (Oct_Vec2){1, 1},
+            (Oct_Vec2){1 * gSoundVolume, 1 * gSoundVolume},
             0);
     create_particles_job(&(CreateParticlesJob) {
             .lifetime = 0.8,
@@ -729,7 +818,7 @@ void imma_firin_muh_lazor(Character *character) {
 void blow_up(Character *character) {
     oct_PlaySound(
             oct_GetAsset(gBundle, "sounds/kaboom.wav"),
-            (Oct_Vec2){1, 1},
+            (Oct_Vec2){1 * gSoundVolume, 1 * gSoundVolume},
             0);
     create_particles_job(&(CreateParticlesJob) {
             .lifetime = 0.8,
@@ -777,7 +866,7 @@ InputProfile process_player(Character *character) {
         input.y_acc = -PLAYER_JUMP_SPEED;
         oct_PlaySound(
                 oct_GetAsset(gBundle, "sounds/jump.wav"),
-                (Oct_Vec2){0.5, 0.5},
+                (Oct_Vec2){0.5 * gSoundVolume, 0.5 * gSoundVolume},
                 false);
     }
 
@@ -796,7 +885,7 @@ InputProfile process_player(Character *character) {
         } else if (character->type == CHARACTER_TYPE_DASHER && kinda_touching_ground) {
             CollisionEvent left = collision_at(character, null, character->physx.x + character->physx.bb_width, character->physx.y-10, character->physx.bb_width, character->physx.bb_height + 10);
             CollisionEvent right = collision_at(character, null, character->physx.x - character->physx.bb_width, character->physx.y-10, character->physx.bb_width, character->physx.bb_height + 10);
-            oct_PlaySound(oct_GetAsset(gBundle, "sounds/punch.wav"), (Oct_Vec2){1, 1}, false);
+            oct_PlaySound(oct_GetAsset(gBundle, "sounds/punch.wav"), (Oct_Vec2){1 * gSoundVolume, 1 * gSoundVolume}, false);
             character->physx.y_vel -= DASHER_FLING_Y_DISTANCE;
             if (left.type == COLLISION_EVENT_TYPE_CHARACTER) {
                 left.character->physx.y_vel -= DASHER_FLING_Y_DISTANCE;
@@ -846,7 +935,7 @@ void take_body(Character *character) {
 
     oct_PlaySound(
             oct_GetAsset(gBundle, "sounds/transform.wav"),
-            (Oct_Vec2){1, 1},
+            (Oct_Vec2){1 * gSoundVolume, 1 * gSoundVolume},
             false);
 
     // kill old player
@@ -867,7 +956,7 @@ void shoot_x_bullet(Character *character) {
             0);
     oct_PlaySound(
             oct_GetAsset(gBundle, "sounds/gunshot.wav"),
-            (Oct_Vec2){1, 1},
+            (Oct_Vec2){1 * gSoundVolume, 1 * gSoundVolume},
             false);
     character->physx.x_vel -= X_SHOOTER_RECOIL * character->facing;
 }
@@ -885,7 +974,7 @@ void shoot_y_bullet(Character *character) {
             -Y_SHOOTER_BULLET_SPEED);
     oct_PlaySound(
             oct_GetAsset(gBundle, "sounds/gunshot.wav"),
-            (Oct_Vec2){1, 1},
+            (Oct_Vec2){1 * gSoundVolume, 1 * gSoundVolume},
             false);
 }
 
@@ -902,7 +991,7 @@ void shoot_xy_bullet(Character *character) {
             -XY_SHOOTER_BULLET_SPEED);
     oct_PlaySound(
             oct_GetAsset(gBundle, "sounds/gunshot.wav"),
-            (Oct_Vec2){1, 1},
+            (Oct_Vec2){1 * gSoundVolume, 1 * gSoundVolume},
             false);
     character->physx.x_vel -= XY_SHOOTER_RECOIL * character->facing;
 }
@@ -935,7 +1024,7 @@ void kill_character(bool player_is_the_killer, Character *character, bool dramat
         // small sound
         oct_PlaySound(
                 oct_GetAsset(gBundle, "sounds/jumpenemy.wav"),
-                (Oct_Vec2){1, 1},
+                (Oct_Vec2){1 * gSoundVolume, 1 * gSoundVolume},
                 false);
 
         create_particles_job(&(CreateParticlesJob){
@@ -963,7 +1052,7 @@ void kill_character(bool player_is_the_killer, Character *character, bool dramat
         if (state.lifespan <= 0) {
             oct_PlaySound(
                     oct_GetAsset(gBundle, "sounds/die.wav"),
-                    (Oct_Vec2) {1, 1},
+                    (Oct_Vec2) {1 * gSoundVolume, 1 * gSoundVolume},
                     false);
 
             create_particles_job(&(CreateParticlesJob) {
@@ -996,7 +1085,7 @@ void kill_character(bool player_is_the_killer, Character *character, bool dramat
 
             oct_PlaySound(
                     oct_GetAsset(gBundle, "sounds/jumpenemy.wav"),
-                    (Oct_Vec2) {1, 1},
+                    (Oct_Vec2) {1 * gSoundVolume, 1 * gSoundVolume},
                     false);
 
             create_particles_job(&(CreateParticlesJob){
@@ -1098,13 +1187,13 @@ InputProfile pre_process_ai(Character *character) {
                 character->physx.y_vel -= DASHER_FLING_Y_DISTANCE;
                 character->physx.x_vel -= DASHER_FLING_X_DISTANCE;
                 kill_character(false, left.character, true);
-                oct_PlaySound(oct_GetAsset(gBundle, "sounds/punch.wav"), (Oct_Vec2){1, 1}, false);
+                oct_PlaySound(oct_GetAsset(gBundle, "sounds/punch.wav"), (Oct_Vec2){1 * gSoundVolume, 1 * gSoundVolume}, false);
             } else if (right.type == COLLISION_EVENT_TYPE_CHARACTER) {
                 right.character->physx.y_vel -= DASHER_FLING_Y_DISTANCE;
                 character->physx.y_vel -= DASHER_FLING_Y_DISTANCE;
                 character->physx.x_vel += DASHER_FLING_X_DISTANCE;
                 kill_character(false, right.character, true);
-                oct_PlaySound(oct_GetAsset(gBundle, "sounds/punch.wav"), (Oct_Vec2){1, 1}, false);
+                oct_PlaySound(oct_GetAsset(gBundle, "sounds/punch.wav"), (Oct_Vec2){1 * gSoundVolume, 1 * gSoundVolume}, false);
             }
         }
     }
@@ -1391,7 +1480,7 @@ void game_begin() {
 
     // Add the player
     state.player = add_character(&(Character){
-        .type = CHARACTER_TYPE_JUMPER,
+        .type = menu_state.character == STARTING_BODY_JUMPER ? CHARACTER_TYPE_JUMPER : CHARACTER_TYPE_Y_SHOOTER,
         .player_controlled = true,
         .physx = {
                 .x = 15.5 * 16,
@@ -1403,6 +1492,7 @@ void game_begin() {
 }
 
 float str_count(const char *s, char c) {
+    if (!s) return 0;
     float count = 0;
     while (*s) {
         if (*s == c) count += 1;
@@ -1413,6 +1503,7 @@ float str_count(const char *s, char c) {
 
 // fuck you
 float longest_len(const char *s, char c) {
+    if (!s) return 0;
     float count = 0;
     float big = 0;
     while (*s) {
@@ -1431,14 +1522,16 @@ void draw_text_box(float x, float y, const char *txt) {
     const float size_x = longest_len(txt, '\n') * 7;
     const float size_y = 11 + (11 * str_count(txt, '\n'));
 
-    oct_DrawRectangleColour(
+    oct_DrawRectangleIntColour(
+            OCT_INTERPOLATE_ALL, 89,
             &(Oct_Colour){0, 0, 0, 1},
             &(Oct_Rectangle){
                 .size = {size_x + 2, size_y + 5},
                 .position = {x - 1 - (size_x / 2), y - 1 - (size_y / 2)}
             },
             true, 1);
-    oct_DrawText(
+    oct_DrawTextInt(
+            OCT_INTERPOLATE_ALL, 90,
             oct_GetAsset(gBundle, "fnt_monogram"),
             (Oct_Vec2){roundf(x - (size_x / 2)), roundf(y - (size_y / 2))},
             1,
@@ -1681,7 +1774,7 @@ void draw_player_death_screen() {
             state.banner_dropped = true;
             oct_PlaySound(
                     oct_GetAsset(gBundle, "sounds/bumpwall.wav"),
-                    (Oct_Vec2){1, 1},
+                    (Oct_Vec2){1 * gSoundVolume, 1 * gSoundVolume},
                     false);
             create_particles_job(&(CreateParticlesJob){
                     .variation = 3,
@@ -1728,6 +1821,7 @@ void draw_player_death_screen() {
 }
 
 GameStatus game_update() {
+    oct_DrawTexture(oct_GetAsset(gBundle, "textures/bg1.png"), (Oct_Vec2){0, 0});
 
     oct_TilemapDraw(state.level_map);
 
@@ -1787,7 +1881,7 @@ GameStatus game_update() {
 
     // debug
     if (oct_KeyDown(OCT_KEY_F)) {
-        return GAME_STATUS_END_GAME;
+        return GAME_STATUS_MENU;
     }
 
     return GAME_STATUS_PLAY_GAME;
@@ -1798,12 +1892,292 @@ void game_end() {
 }
 
 ///////////////////////// MENU /////////////////////////
-void menu_begin() {
+void draw_cursor(uint64_t id, float x, float y, const char *str) {
+    Oct_Vec2 text_size;
+    oct_GetTextSize(
+            oct_GetAsset(gBundle, "fnt_kingdom"),
+            text_size,
+            1,
+            "%s", str);
 
+    const float target_x = x - 1;
+    const float target_y = y - 1;
+    const float target_width = text_size[0] + 2;
+    const float target_height = text_size[1] + 4;
+    const float factor = 0.3;
+    menu_state.cursor_x += (target_x - menu_state.cursor_x) * factor;
+    menu_state.cursor_y += (target_y - menu_state.cursor_y) * factor;
+    menu_state.cursor_width += (target_width - menu_state.cursor_width) * factor;
+    menu_state.cursor_height += (target_height - menu_state.cursor_height) * factor;
+
+    oct_DrawRectangleIntColour(
+            OCT_INTERPOLATE_ALL,
+            25,
+            &(Oct_Colour){0, 0, 0, 1},
+            &(Oct_Rectangle){
+                    .position = {menu_state.cursor_x, menu_state.cursor_y},
+                    .size = {menu_state.cursor_width, menu_state.cursor_height}
+            },
+            true, 1);
+}
+
+void draw_text_fancy(uint64_t id, float x, float y, const char *str) {
+    oct_DrawTextIntColour(
+            OCT_INTERPOLATE_ALL, id,
+            oct_GetAsset(gBundle, "fnt_kingdom"),
+            (Oct_Vec2){x + 1, y + 1},
+            &(Oct_Colour){0, 0, 0, 1},
+            1,
+            "%s", str);
+    oct_DrawTextInt(
+            OCT_INTERPOLATE_ALL, id + 1,
+            oct_GetAsset(gBundle, "fnt_kingdom"),
+            (Oct_Vec2){x, y},
+            1,
+            "%s", str);
+}
+
+void handle_top_menu() {
+    draw_cursor(25, 40 + (5 * menu_state.cursor), 150 + (24 * menu_state.cursor), TOP_LEVEL_MENU[menu_state.cursor]);
+    for (int i = 0; i < TOP_MENU_SIZE; i++) {
+        draw_text_fancy(20 * i, 40 + (5 * i), 150 + (24 * i), TOP_LEVEL_MENU[i]);
+    }
+    if (oct_KeyPressed(OCT_KEY_UP)) {
+        menu_state.cursor = menu_state.cursor == 0 ? TOP_MENU_SIZE - 1 : menu_state.cursor - 1;
+        oct_PlaySound(
+                    oct_GetAsset(gBundle, "sounds/cursor.wav"),
+                    (Oct_Vec2){0.8 * gSoundVolume, 0.8 * gSoundVolume},
+                    false);
+    }
+    if (oct_KeyPressed(OCT_KEY_DOWN)) {
+        menu_state.cursor = (menu_state.cursor + 1) % TOP_MENU_SIZE;
+        oct_PlaySound(
+                oct_GetAsset(gBundle, "sounds/cursor.wav"),
+                (Oct_Vec2){0.8 * gSoundVolume, 0.8 * gSoundVolume},
+                false);
+    }
+    if (oct_KeyPressed(OCT_KEY_SPACE)) {
+        oct_PlaySound(
+                oct_GetAsset(gBundle, "sounds/select.wav"),
+                (Oct_Vec2){0.8 * gSoundVolume, 0.8 * gSoundVolume},
+                false);
+
+        if (menu_state.cursor == 0)  { // play menu
+            menu_state.menu = MENU_INDEX_PLAY;
+            menu_state.cursor = 0;
+        } else if (menu_state.cursor == 1)  { // options menu
+            menu_state.menu = MENU_INDEX_SETTINGS;
+            menu_state.cursor = 0;
+        } else if (menu_state.cursor == 2)  { // leaderboards menu
+            menu_state.menu = MENU_INDEX_LEADERBOARDS;
+            menu_state.cursor = 0;
+        } else if (menu_state.cursor == 3)  { // quit
+            menu_state.quit = true;
+        }
+    }
+}
+
+void show_confirmation(const char *text) {
+    menu_state.starting_text_box_frame = gFrameCounter;
+    menu_state.drop_text = text;
+}
+
+void handle_settings() {
+    draw_cursor(25, 40 + (5 * menu_state.cursor), 120 + (24 * menu_state.cursor), OPTION_MENU[menu_state.cursor]);
+    for (int i = 0; i < OPTIONS_MENU_SIZE; i++) {
+        draw_text_fancy(20 * i, 40 + (5 * i), 120 + (24 * i), OPTION_MENU[i]);
+    }
+    if (oct_KeyPressed(OCT_KEY_UP)) {
+        menu_state.cursor = menu_state.cursor == 0 ? OPTIONS_MENU_SIZE - 1 : menu_state.cursor - 1;
+        oct_PlaySound(
+                oct_GetAsset(gBundle, "sounds/cursor.wav"),
+                (Oct_Vec2){0.8 * gSoundVolume, 0.8 * gSoundVolume},
+                false);
+    }
+    if (oct_KeyPressed(OCT_KEY_DOWN)) {
+        menu_state.cursor = (menu_state.cursor + 1) % OPTIONS_MENU_SIZE;
+        oct_PlaySound(
+                oct_GetAsset(gBundle, "sounds/cursor.wav"),
+                (Oct_Vec2){0.8 * gSoundVolume, 0.8 * gSoundVolume},
+                false);
+    }
+    if (oct_KeyPressed(OCT_KEY_SPACE)) {
+        oct_PlaySound(
+                oct_GetAsset(gBundle, "sounds/select.wav"),
+                (Oct_Vec2){0.8 * gSoundVolume, 0.8 * gSoundVolume},
+                false);
+
+        if (menu_state.cursor == 0)  { // Reset tutorial
+            Save s = parse_save();
+            s.has_done_tutorial = false;
+            save_game(&s);
+            show_confirmation("bozo ");
+        } else if (menu_state.cursor == 1)  { // Toggle music
+            Save s = parse_save();
+            s.music_volume = s.music_volume != 0 ? 0 : 1;
+            save_game(&s);
+            if (s.music_volume == 0)
+                show_confirmation("music = 0 ");
+            else
+                show_confirmation("music = 1 ");
+        } else if (menu_state.cursor == 2)  { // Toggle sound
+            Save s = parse_save();
+            s.sound_volume = s.sound_volume != 0 ? 0 : 1;
+            save_game(&s);
+            if (s.sound_volume == 0)
+                show_confirmation("sound = 0 ");
+            else
+                show_confirmation("sound = 1 ");
+        } else if (menu_state.cursor == 3)  { // Toggle fullscreen
+            Save s = parse_save();
+            s.fullscreen = !s.fullscreen;
+            save_game(&s);
+            show_confirmation("okay ");
+            oct_SetFullscreen(s.fullscreen);
+        } else if (menu_state.cursor == 4)  { // Toggle pixel-perfect
+            Save s = parse_save();
+            s.pixel_perfect = !s.pixel_perfect;
+            gPixelPerfect = s.pixel_perfect;
+            save_game(&s);
+            show_confirmation("okay ");
+        } else if (menu_state.cursor == 5)  { // Back
+            menu_state.menu = MENU_INDEX_TOP;
+            menu_state.cursor = 0;
+        }
+    }
+}
+
+void handle_leaderboards() {
+    menu_state.menu = MENU_INDEX_TOP;
+    menu_state.cursor = 0;
+    // todo: this
+}
+
+void handle_play() {
+    draw_cursor(25, 40 + (5 * menu_state.cursor), 150 + (24 * menu_state.cursor), PLAY_MENU[menu_state.cursor]);
+    for (int i = 0; i < PLAY_MENU_SIZE; i++) {
+        draw_text_fancy(20 * i, 40 + (5 * i), 150 + (24 * i), PLAY_MENU[i]);
+    }
+    if (oct_KeyPressed(OCT_KEY_UP)) {
+        menu_state.cursor = menu_state.cursor == 0 ? PLAY_MENU_SIZE - 1 : menu_state.cursor - 1;
+        oct_PlaySound(
+                oct_GetAsset(gBundle, "sounds/cursor.wav"),
+                (Oct_Vec2){0.8 * gSoundVolume, 0.8 * gSoundVolume},
+                false);
+    }
+    if (oct_KeyPressed(OCT_KEY_DOWN)) {
+        menu_state.cursor = (menu_state.cursor + 1) % PLAY_MENU_SIZE;
+        oct_PlaySound(
+                oct_GetAsset(gBundle, "sounds/cursor.wav"),
+                (Oct_Vec2){0.8 * gSoundVolume, 0.8 * gSoundVolume},
+                false);
+    }
+    if (oct_KeyPressed(OCT_KEY_SPACE)) {
+        oct_PlaySound(
+                oct_GetAsset(gBundle, "sounds/select.wav"),
+                (Oct_Vec2){0.8 * gSoundVolume, 0.8 * gSoundVolume},
+                false);
+
+        if (menu_state.cursor == 0)  { // play
+            menu_state.start_game = true;
+        } else if (menu_state.cursor == 1)  { // swap body
+            menu_state.character = (menu_state.character + 1) % STARTING_BODY_MAX;
+        } else if (menu_state.cursor == 2)  { // swap map
+            menu_state.map = (menu_state.map + 1) % STARTING_MAP_MAX;
+        } else if (menu_state.cursor == 3)  { // back
+            menu_state.menu = MENU_INDEX_TOP;
+            menu_state.cursor = 0;
+        }
+    }
+
+    // draw selected map & character
+    const float character_x = 144;
+    const float character_y = 180;
+    const float map_x = character_x;
+    const float map_y = character_y + 24;
+
+    if (menu_state.character == STARTING_BODY_Y_SHOOTER) {
+        const float gun_x = character_x + 6 - (19 / 2);
+        oct_DrawSpriteFrame(
+                oct_GetAsset(gBundle, "sprites/playershooter.json"), 0,
+                (Oct_Vec2) {character_x, character_y});
+        oct_DrawTextureExt(
+                oct_GetAsset(gBundle, "textures/ygun.png"),
+                (Oct_Vec2) {gun_x, character_y - 23},
+                (Oct_Vec2) {1, 1},
+                0, (Oct_Vec2) {0, 0});
+    } else {
+        oct_DrawSpriteFrame(
+                oct_GetAsset(gBundle, "sprites/playerjumper.json"), 0,
+                (Oct_Vec2) {character_x, character_y});
+    }
+    const char *maps[] = {"Map 1", "Map 2", "Map 3"};
+    oct_DrawText(oct_GetAsset(gBundle, "fnt_monogram"),
+                 (Oct_Vec2){map_x, map_y},
+                 1,
+                 "%s", maps[menu_state.map]);
+}
+
+void menu_begin() {
+    memset(&menu_state, 0, sizeof(struct MenuState_t));
 }
 
 GameStatus menu_update() {
-    return GAME_STATUS_PLAY_GAME;
+    // moving bg
+    const float x = gFrameCounter % (int)GAME_WIDTH;
+    oct_DrawTexture(oct_GetAsset(gBundle, "textures/menubg.png"), (Oct_Vec2){x - GAME_WIDTH, 0});
+    oct_DrawTexture(oct_GetAsset(gBundle, "textures/menubg.png"), (Oct_Vec2){x, 0});
+
+    if (menu_state.menu == MENU_INDEX_TOP)
+        handle_top_menu();
+    else if (menu_state.menu == MENU_INDEX_SETTINGS)
+        handle_settings();
+    else if (menu_state.menu == MENU_INDEX_LEADERBOARDS)
+        handle_leaderboards();
+    else if (menu_state.menu == MENU_INDEX_PLAY)
+        handle_play();
+
+    // show text box thing
+    const float duration = 30 * 4;
+    if (gFrameCounter - menu_state.starting_text_box_frame < duration) {
+        const float frames_left = gFrameCounter - menu_state.starting_text_box_frame;
+        const float x = GAME_WIDTH / 2;
+        const float bottom_y = GAME_HEIGHT / 2;
+        if (frames_left < duration / 3) {
+            const float percent = oct_Sirp(-0.1, 1, frames_left / (duration / 3));
+            draw_text_box(x, bottom_y * percent, menu_state.drop_text);
+        } else if (frames_left < (duration / 3) * 2) {
+            draw_text_box(x, bottom_y, menu_state.drop_text);
+        } else {
+            const float percent = oct_Sirp(1, -0.1, (frames_left - ((duration / 3) * 2)) / (duration / 3));
+            draw_text_box(x, bottom_y * percent, menu_state.drop_text);
+        }
+    }
+
+    oct_DrawTextureInt(
+            OCT_INTERPOLATE_ALL, 87,
+            oct_GetAsset(gBundle, "textures/copyright.png"),
+            (Oct_Vec2){408, 17 + (sin(oct_Time()) * 4)});
+
+    // 212 draw little dude
+    static Oct_SpriteInstance instance;
+    static bool started = false;
+    const Oct_Sprite spr = oct_GetAsset(gBundle, "sprites/laser.json");
+    if (!started) {
+        oct_InitSpriteInstance(&instance, spr, true);
+        started = true;
+    }
+    oct_DrawSpriteExt(spr, &instance, (Oct_Vec2){400, 212}, (Oct_Vec2){-1, 1}, 0, (Oct_Vec2){0, 0});
+
+    oct_DrawTextureExt(
+            oct_GetAsset(gBundle, "textures/title.png"),
+            (Oct_Vec2){GAME_WIDTH / 2 - 30, 40},
+            (Oct_Vec2){1, 1},
+            0, (Oct_Vec2){OCT_ORIGIN_MIDDLE, OCT_ORIGIN_MIDDLE});
+
+    if (menu_state.start_game) return GAME_STATUS_PLAY_GAME;
+    if (menu_state.quit) return GAME_STATUS_QUIT;
+    return GAME_STATUS_MENU;
 }
 
 void menu_end() {
@@ -1824,10 +2198,22 @@ Save parse_save() {
             float score = cJSON_GetNumberValue(cJSON_GetObjectItem(json, "highscore"));
             if (!cJSON_IsNumber(cJSON_GetObjectItem(json, "highscore")))
                 score = 0;
+            float sound_volume = cJSON_GetNumberValue(cJSON_GetObjectItem(json, "sound_volume"));
+            if (!cJSON_IsNumber(cJSON_GetObjectItem(json, "sound_volume")))
+                sound_volume = 1;
+            float music_volume = cJSON_GetNumberValue(cJSON_GetObjectItem(json, "music_volume"));
+            if (!cJSON_IsNumber(cJSON_GetObjectItem(json, "music_volume")))
+                music_volume = 1;
             float has_done_tutorial = cJSON_IsTrue(cJSON_GetObjectItem(json, "done_tutorial"));
+            float fullscreen = cJSON_IsTrue(cJSON_GetObjectItem(json, "fullscreen"));
+            float pixel_perfect = cJSON_IsTrue(cJSON_GetObjectItem(json, "pixel_perfect"));
             Save save = {
                     .highscore = score,
-                    .has_done_tutorial = has_done_tutorial
+                    .sound_volume = sound_volume,
+                    .music_volume = music_volume,
+                    .has_done_tutorial = has_done_tutorial,
+                    .fullscreen = fullscreen,
+                    .pixel_perfect = pixel_perfect
             };
             cJSON_Delete(json);
             oct_Free(gAllocator, data);
@@ -1845,6 +2231,10 @@ void save_game(Save *save) {
     cJSON *json = cJSON_CreateObject();
     cJSON_AddNumberToObject(json, "highscore", save->highscore);
     cJSON_AddBoolToObject(json, "done_tutorial", save->has_done_tutorial);
+    cJSON_AddBoolToObject(json, "fullscreen", save->fullscreen);
+    cJSON_AddBoolToObject(json, "pixel_perfect", save->pixel_perfect);
+    cJSON_AddNumberToObject(json, "sound_volume", save->sound_volume);
+    cJSON_AddNumberToObject(json, "music_volume", save->music_volume);
     // todo add ip shit eventually
     char * s = cJSON_Print(json);
     oct_WriteFile(SAVE_NAME, s, strlen(s));
@@ -1863,7 +2253,12 @@ void *startup() {
 
     // oct shit
     oct_GamepadSetAxisDeadzone(GAMEPAD_DEADZONE);
-    oct_SetFullscreen(true);
+
+    Save s = parse_save();
+    gPixelPerfect = s.pixel_perfect;
+    oct_SetFullscreen(s.fullscreen);
+    gSoundVolume = s.sound_volume;
+    gMusicVolume = s.music_volume;
 
     return null;
 }
@@ -1875,7 +2270,6 @@ void *update(void *ptr) {
     // Use backbuffer
     oct_SetDrawTarget(gBackBuffer);
     oct_DrawClear(&(Oct_Colour){195.0 / 255.0, 209.0 / 255.0, 234.0 / 255.0, 1});
-    oct_DrawTexture(oct_GetAsset(gBundle, "textures/bg1.png"), (Oct_Vec2){0, 0});
 
     if (in_menu) {
         const GameStatus status = menu_update();
@@ -1888,7 +2282,7 @@ void *update(void *ptr) {
         }
     } else {
         const GameStatus status = game_update();
-        if (status == GAME_STATUS_END_GAME) {
+        if (status == GAME_STATUS_MENU) {
             in_menu = true;
             game_end();
             menu_begin();
@@ -1902,14 +2296,29 @@ void *update(void *ptr) {
     // Draw backbuffer
     const float window_width = oct_WindowWidth();
     const float window_height = oct_WindowHeight();
-    const float scale_x = window_width / GAME_WIDTH;
-    const float scale_y = window_height / GAME_HEIGHT;
-    oct_DrawTextureExt(
-            gBackBuffer,
-            (Oct_Vec2){0, 0},
-            (Oct_Vec2){scale_x, scale_y},
-            0,
-            (Oct_Vec2){0, 0});
+    if (!gPixelPerfect) {
+        const float scale_x = window_width / GAME_WIDTH;
+        const float scale_y = window_height / GAME_HEIGHT;
+        oct_DrawTextureExt(
+                gBackBuffer,
+                (Oct_Vec2) {0, 0},
+                (Oct_Vec2) {scale_x, scale_y},
+                0,
+                (Oct_Vec2) {0, 0});
+    } else {
+        const float scale_x = floorf(window_width / GAME_WIDTH);
+        const float scale_y = floorf(window_height / GAME_HEIGHT);
+        const float width = GAME_WIDTH * scale_x;
+        const float height = GAME_HEIGHT * scale_y;
+        const float x = (window_width - width) / 2;
+        const float y = (window_height - height) / 2;
+        oct_DrawTextureExt(
+                gBackBuffer,
+                (Oct_Vec2) {x, y},
+                (Oct_Vec2) {scale_x, scale_y},
+                0,
+                (Oct_Vec2) {0, 0});
+    }
 
     gFrameCounter++;
     oct_ResetAllocator(gFrameAllocator);

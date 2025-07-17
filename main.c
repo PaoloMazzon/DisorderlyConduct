@@ -82,6 +82,7 @@ uint64_t gParticleIDs = 999999;
 float gSoundVolume = 1;
 float gMusicVolume = 1;
 bool gPixelPerfect;
+Oct_Sound gPlayingMusic;
 
 ///////////////////////// CONSTANTS /////////////////////////
 
@@ -240,7 +241,8 @@ const float JUMPER_DESCEND_SPEED = 3; // how fast the player can descend as jump
 const float PARTICLES_GROUND_IMPACT_SPEED = 6;
 const float SPEED_LIMIT = 12;
 const float PLAYER_STARTING_LIFESPAN = 60; // seconds;
-const int32_t START_REQ_KILLS = 3;
+const int32_t START_REQ_KILLS = 2;
+const int32_t REQ_KILLS_ACCUMULATOR = 2; // every x transforms the kills required goes up by 1
 const float ENEMY_FLING_SPEED = 5;
 const int32_t PLAYER_I_FRAMES = 30;
 const float PLAYER_SPEED_FACTOR = 3; // how much fast the player is than the ai in the same types
@@ -257,6 +259,8 @@ const float DASHER_FLING_X_DISTANCE = 10;
 const float BOMBER_BLAST_RADIUS = 64;
 const int32_t MOUTH_OPEN_DURATION = 8;
 const float FADE_IN_OUT_TIME = 1 * 30;
+const float TRANSFORM_INDICATE_TIME = 0.8;
+const float GLOBAL_MUSIC_VOLUME = 0.23;
 const char *SAVE_NAME = "save.json";
 
 ///////////////////////// STRUCTS /////////////////////////
@@ -401,8 +405,9 @@ typedef struct GameState_t {
     float max_lifespan;
     Character *player;
     float total_time;
-    int req_kills; // for transforming
-    int current_kills;
+    int32_t req_kills; // for transforming
+    int32_t current_kills;
+    int32_t req_kills_accumulator;
     float displayed_kills; // for lerping a nice val
     int32_t player_iframes; // after getting hit
     bool player_died;
@@ -418,6 +423,7 @@ typedef struct GameState_t {
     float score; // literally just 1 per frame
     float fade_in;
     float fade_out;
+    float player_transform_time;
 
     Oct_Tilemap level_map;
     Character characters[MAX_CHARACTERS];
@@ -571,11 +577,13 @@ bool process_physics(Character *this_c, Projectile *this_p, PhysicsObject *physx
     physx->x_vel = oct_Clamp(-SPEED_LIMIT, SPEED_LIMIT, physx->x_vel + x_acceleration);
     physx->y_vel = oct_Clamp(-SPEED_LIMIT, SPEED_LIMIT, physx->y_vel + y_acceleration);
 
-    const bool kinda_touching_ground = collision_at(this_c, this_p, physx->x, physx->y + 1, physx->bb_width, physx->bb_height).type != 0;
+    CollisionEvent ground = collision_at(this_c, this_p, physx->x, physx->y + 1, physx->bb_width, physx->bb_height);
+    const bool kinda_touching_ground = ground.type != 0;
 
     // Friction and gravity
     if (kinda_touching_ground) {
-        physx->x_vel *= (1 - GROUND_FRICTION);
+        if (ground.wallIndex != 20)
+            physx->x_vel *= (1 - GROUND_FRICTION);
     } else {
         physx->x_vel *= (1 - AIR_FRICTION);
     }
@@ -608,10 +616,17 @@ bool process_physics(Character *this_c, Projectile *this_p, PhysicsObject *physx
         }
 
         // Bounce off the wall slightly
-        if (ce.type == COLLISION_EVENT_TYPE_BOUNCY_WALL)
+        if (ce.type == COLLISION_EVENT_TYPE_BOUNCY_WALL) {
             physx->x_vel = physx->x_vel * (-BOUNCE_PRESERVED_BOUNCE_WALL);
-        else
+        } else {
+            if (ce.type == COLLISION_EVENT_TYPE_CHARACTER) {
+                ce.character->physx.x_vel += physx->x_vel;
+            }
+            if (ce.type == COLLISION_EVENT_TYPE_PROJECTILE) {
+                ce.projectile->physx.x_vel += physx->x_vel;
+            }
             physx->x_vel = physx->x_vel * (-BOUNCE_PRESERVED);
+        }
         collision = true;
     }
     physx->x += physx->x_vel;
@@ -646,10 +661,17 @@ bool process_physics(Character *this_c, Projectile *this_p, PhysicsObject *physx
         }
 
         // Bounce off the wall slightly
-        if (ce.type == COLLISION_EVENT_TYPE_BOUNCY_WALL)
+        if (ce.type == COLLISION_EVENT_TYPE_BOUNCY_WALL) {
             physx->y_vel = physx->y_vel * (-BOUNCE_PRESERVED_BOUNCE_WALL);
-        else
+        } else {
+            if (ce.type == COLLISION_EVENT_TYPE_CHARACTER) {
+                ce.character->physx.y_vel += physx->y_vel;
+            }
+            if (ce.type == COLLISION_EVENT_TYPE_PROJECTILE) {
+                ce.projectile->physx.y_vel += physx->y_vel;
+            }
             physx->y_vel = physx->y_vel * (-BOUNCE_PRESERVED);
+        }
     }
     physx->y += physx->y_vel;
     return collision;
@@ -866,7 +888,7 @@ InputProfile process_player(Character *character) {
                oct_GamepadLeftAxisX(0) > 0) {
         input.x_acc = (ACCELERATION_VALUES[character->type] * PLAYER_SPEED_FACTOR);
     }
-    const bool kinda_touching_ground = collision_at(character, null, character->physx.x, character->physx.y + 1, character->physx.bb_width, character->physx.bb_height).type;
+    const bool kinda_touching_ground = collision_at(character, null, character->physx.x, character->physx.y + 2, character->physx.bb_width, character->physx.bb_height).type;
 
     // jumping (player can always jump)
     if (kinda_touching_ground && (oct_KeyPressed(OCT_KEY_UP) || oct_GamepadButtonPressed(0, OCT_GAMEPAD_BUTTON_A))) {
@@ -890,8 +912,8 @@ InputProfile process_player(Character *character) {
         } else if (character->type == CHARACTER_TYPE_XY_SHOOTER) {
             shoot_xy_bullet(character);
         } else if (character->type == CHARACTER_TYPE_DASHER && kinda_touching_ground) {
-            CollisionEvent left = collision_at(character, null, character->physx.x + character->physx.bb_width, character->physx.y-10, character->physx.bb_width, character->physx.bb_height + 10);
-            CollisionEvent right = collision_at(character, null, character->physx.x - character->physx.bb_width, character->physx.y-10, character->physx.bb_width, character->physx.bb_height + 10);
+            CollisionEvent left = collision_at(character, null, character->physx.x + character->physx.bb_width, character->physx.y-16, character->physx.bb_width, character->physx.bb_height + 16);
+            CollisionEvent right = collision_at(character, null, character->physx.x - character->physx.bb_width, character->physx.y-16, character->physx.bb_width, character->physx.bb_height + 16);
             oct_PlaySound(oct_GetAsset(gBundle, "sounds/punch.wav"), (Oct_Vec2){1 * gSoundVolume, 1 * gSoundVolume}, false);
             character->physx.y_vel -= DASHER_FLING_Y_DISTANCE;
             if (left.type == COLLISION_EVENT_TYPE_CHARACTER) {
@@ -919,7 +941,12 @@ InputProfile process_player(Character *character) {
 // transforms the player into this dude
 void take_body(Character *character) {
     // reset kills and show a nice particle effect
-    state.req_kills++;
+    state.req_kills_accumulator++;
+    if (state.req_kills_accumulator == REQ_KILLS_ACCUMULATOR) {
+        state.req_kills_accumulator = 0;
+        state.req_kills++;
+    }
+    state.player_transform_time = state.total_time;
     state.current_kills = 0;
     create_particles_job(&(CreateParticlesJob){
             .lifetime = 3,
@@ -931,6 +958,7 @@ void take_body(Character *character) {
             .y = 48,
             .y_vel = -2
     });
+    state.player_iframes = PLAYER_I_FRAMES;
 
     // Take dudes body
     Character *player = state.player;
@@ -1454,6 +1482,7 @@ void game_begin() {
             (Oct_Vec2){16, 16});
     state.req_kills = START_REQ_KILLS;
     oct_InitSpriteInstance(&state.fire, oct_GetAsset(gBundle, "sprites/fire.json"), true);
+    state.player_transform_time = -5;
 
     // Open json with level
     const char *maps[] = {"data/map1.tmj", "data/map2.tmj", "data/map3.tmj"};
@@ -1498,6 +1527,20 @@ void game_begin() {
     state.lifespan = PLAYER_STARTING_LIFESPAN;
     state.max_lifespan = PLAYER_STARTING_LIFESPAN;
     state.fade_in = FADE_IN_OUT_TIME;
+
+    // play game music
+    oct_StopSound(gPlayingMusic);
+    if (oct_Random(0, 1) > 0.5) {
+        gPlayingMusic = oct_PlaySound(
+                oct_GetAsset(gBundle, "sounds/ost1.ogg"),
+                (Oct_Vec2){GLOBAL_MUSIC_VOLUME * gMusicVolume, GLOBAL_MUSIC_VOLUME * gMusicVolume},
+                true);
+    } else {
+        gPlayingMusic = oct_PlaySound(
+                oct_GetAsset(gBundle, "sounds/ost2.ogg"),
+                (Oct_Vec2){GLOBAL_MUSIC_VOLUME * gMusicVolume, GLOBAL_MUSIC_VOLUME * gMusicVolume},
+                true);
+    }
 }
 
 float str_count(const char *s, char c) {
@@ -1577,7 +1620,7 @@ void handle_tutorial() {
                 oct_GetAsset(gBundle, "textures/pointer.png"),
                 (Oct_Vec2){155 + (sin(oct_Time() * 2) * 10), 58});
     } else if (state.total_time < 45) {
-        draw_text_box(GAME_WIDTH / 2, GAME_HEIGHT / 2, "Have fun!");
+        draw_text_box(GAME_WIDTH / 2, GAME_HEIGHT / 2, "Watch out for the bouncy\nwalls and have fun!");
     }
 }
 
@@ -1692,7 +1735,7 @@ int32_t same_chance(int32_t n){
 
 void handle_enemy_spawns() {
     state.frame_count++;
-    if (state.game_phase < GAME_PHASES - 1 && state.frame_count >= TIME_BETWEEN_PHASES[state.game_phase]) {
+    if (state.game_phase < GAME_PHASES - 1 && state.frame_count >= TIME_BETWEEN_PHASES[state.game_phase] && !state.player_died) {
         state.game_phase += 1;
         state.frame_count = 0;
     }
@@ -1829,6 +1872,21 @@ void draw_player_death_screen() {
     }
 }
 
+void draw_transform_indicator() {
+    if (state.total_time - state.player_transform_time < TRANSFORM_INDICATE_TIME) {
+        const float percent = (state.total_time - state.player_transform_time) / TRANSFORM_INDICATE_TIME;
+        oct_DrawCircleIntColour(
+                OCT_INTERPOLATE_ALL,
+                55,
+                &(Oct_Circle){
+                    .position = {state.player->physx.x + 6, state.player->physx.y + 6},
+                    .radius = percent * 50,
+                },
+                &(Oct_Colour){1, 1, 1, oct_Sirp(1, 0, percent)},
+                false, 2);
+    }
+}
+
 GameStatus game_update() {
     Oct_Texture texs[] = {
             oct_GetAsset(gBundle, "textures/bg1.png"),
@@ -1849,6 +1907,9 @@ GameStatus game_update() {
 
     // this is causing major fuckups that im not dealing with
     //queue_particles_jobs(gFrameAllocator);
+    draw_kill_bar();
+    draw_time_bar();
+    draw_score();
 
     for (int i = 0; i < MAX_CHARACTERS; i++) {
         if (!state.characters[i].alive) continue;
@@ -1862,9 +1923,7 @@ GameStatus game_update() {
     }
 
     draw_player_death_screen();
-    draw_kill_bar();
-    draw_time_bar();
-    draw_score();
+    draw_transform_indicator();
     draw_time_alert();
     handle_tutorial();
 
@@ -1877,8 +1936,85 @@ GameStatus game_update() {
             kill_character(false, state.player, false);
         }
 
-        if (!state.player_died)
+        if (!state.player_died) {
+            const float prev_score = state.score;
             state.score += 1 + state.game_phase;
+
+            // show little animations for getting scores
+            if (state.score >= 5000 && prev_score < 5000) {
+                create_particles_job(&(CreateParticlesJob){
+                        .variation = 3,
+                        .y_vel = -2,
+                        .x_vel = 3,
+                        .tex = oct_GetAsset(gBundle, "textures/5kpoints.png"),
+                        .spr = OCT_NO_ASSET,
+                        .x = GAME_WIDTH / 2 - 120,
+                        .y = 40,
+                        .count = 3,
+                        .lifetime = 4
+                });
+            } else if (state.score >= 10000 && prev_score < 10000) {
+                    create_particles_job(&(CreateParticlesJob){
+                        .variation = 3,
+                        .y_vel = -2,
+                        .x_vel = 3,
+                        .tex = oct_GetAsset(gBundle, "textures/10kpoints.png"),
+                        .spr = OCT_NO_ASSET,
+                        .x = GAME_WIDTH / 2 - 120,
+                        .y = 40,
+                        .count = 3,
+                        .lifetime = 4
+                });
+            } else if (state.score >= 20000 && prev_score < 20000) {
+                    create_particles_job(&(CreateParticlesJob){
+                        .variation = 3,
+                        .y_vel = -2,
+                        .x_vel = 3,
+                        .tex = oct_GetAsset(gBundle, "textures/20kpoints.png"),
+                        .spr = OCT_NO_ASSET,
+                        .x = GAME_WIDTH / 2 - 120,
+                        .y = 40,
+                        .count = 3,
+                        .lifetime = 4
+                });
+            } else if (state.score >= 40000 && prev_score < 40000) {
+                    create_particles_job(&(CreateParticlesJob){
+                        .variation = 3,
+                        .y_vel = -2,
+                        .x_vel = 3,
+                        .tex = oct_GetAsset(gBundle, "textures/40kpoints.png"),
+                        .spr = OCT_NO_ASSET,
+                        .x = GAME_WIDTH / 2 - 120,
+                        .y = 40,
+                        .count = 3,
+                        .lifetime = 4
+                });
+            } else if (state.score >= 100000 && prev_score < 100000) {
+                    create_particles_job(&(CreateParticlesJob){
+                        .variation = 3,
+                        .y_vel = -2,
+                        .x_vel = 3,
+                        .tex = oct_GetAsset(gBundle, "textures/100kpoints.png"),
+                        .spr = OCT_NO_ASSET,
+                        .x = GAME_WIDTH / 2 - 120,
+                        .y = 40,
+                        .count = 3,
+                        .lifetime = 4
+                });
+            } else if (state.score >= 200000 && prev_score < 200000) {
+                    create_particles_job(&(CreateParticlesJob){
+                        .variation = 3,
+                        .y_vel = -2,
+                        .x_vel = 3,
+                        .tex = oct_GetAsset(gBundle, "textures/200kpoints.png"),
+                        .spr = OCT_NO_ASSET,
+                        .x = GAME_WIDTH / 2 - 120,
+                        .y = 40,
+                        .count = 3,
+                        .lifetime = 4
+                });
+            }
+        }
 
         handle_enemy_spawns();
     }
@@ -1894,7 +2030,7 @@ GameStatus game_update() {
 
 
     // quit when player rip
-    if (oct_KeyPressed(OCT_KEY_SPACE) && state.player_died && state.fade_out < 0) {
+    if (oct_KeyPressed(OCT_KEY_SPACE) && state.player_died && state.fade_out < 0 && state.total_time - state.player_die_time > 3) {
         state.fade_out = FADE_IN_OUT_TIME;
         oct_PlaySound(
                 oct_GetAsset(gBundle, "sounds/stonelong.wav"),
@@ -2060,6 +2196,7 @@ void handle_settings() {
             s.music_volume = s.music_volume != 0 ? 0 : 1;
             save_game(&s);
             gMusicVolume = s.music_volume;
+            oct_UpdateSound(gPlayingMusic, (Oct_Vec2){GLOBAL_MUSIC_VOLUME * gMusicVolume, GLOBAL_MUSIC_VOLUME * gMusicVolume}, true, false);
             if (s.music_volume == 0)
                 show_confirmation("music = 0 ");
             else
@@ -2168,14 +2305,23 @@ void handle_play() {
 }
 
 void menu_begin() {
+    static bool fuck = false;
     memset(&menu_state, 0, sizeof(struct MenuState_t));
     menu_state.fade_in = FADE_IN_OUT_TIME;
+    Save s = parse_save();
+    menu_state.highscore = s.highscore;
+    if (fuck) {
+        oct_StopSound(gPlayingMusic);
+    }
+    fuck = true;
+    gPlayingMusic = oct_PlaySound(
+            oct_GetAsset(gBundle, "sounds/title.ogg"),
+            (Oct_Vec2){GLOBAL_MUSIC_VOLUME * gMusicVolume, GLOBAL_MUSIC_VOLUME * gMusicVolume},
+            true);
     oct_PlaySound(
             oct_GetAsset(gBundle, "sounds/stoneshort.wav"),
             (Oct_Vec2){1 * gSoundVolume, 1 * gSoundVolume},
             false);
-    Save s = parse_save();
-    menu_state.highscore = s.highscore;
 }
 
 GameStatus menu_update() {

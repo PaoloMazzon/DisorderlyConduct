@@ -15,5 +15,5 @@ file(GLOB C_FILES src/*.c)
 include_directories(include/ Octarine/OctarineEngine/include)
 
 # Final executable
-add_executable(${PROJECT_NAME} main.c ${C_FILES})
+add_executable(${PROJECT_NAME} main.c icon.rc resource.rc ${C_FILES})
 target_link_libraries(${PROJECT_NAME} PRIVATE OctarineEngine)

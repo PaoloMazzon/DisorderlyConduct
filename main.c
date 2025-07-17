@@ -203,10 +203,9 @@ const int32_t TIME_BETWEEN_PHASES[] = {
 const char * TOP_LEVEL_MENU[] = {
         "Play",
         "Settings",
-        "Leaderboard",
         "Quit"
 };
-const int32_t TOP_MENU_SIZE = 4;
+const int32_t TOP_MENU_SIZE = 3;
 
 const char *OPTION_MENU[] = {
         "Reset tutorial",
@@ -226,6 +225,12 @@ const char *PLAY_MENU[] = {
 };
 const int32_t PLAY_MENU_SIZE = 4;
 
+const float MAP_UNLOCK_SCORES[] = {
+        0,
+        10000,
+        20000,
+};
+
 #define MAX_CHARACTERS 100
 #define MAX_PROJECTILES 100
 #define MAX_PARTICLES 1000
@@ -237,7 +242,7 @@ const float BOUNCE_PRESERVED_BOUNCE_WALL = 0.50; // how much velocity is preserv
 const float BOUNCE_PRESERVED = 0.20; // how much velocity is preserved when rebounding off walls
 const float GAMEPAD_DEADZONE = 0.25;
 const float PLAYER_JUMP_SPEED = 7;
-const float JUMPER_DESCEND_SPEED = 3; // how fast the player can descend as jumper
+const float JUMPER_DESCEND_SPEED = 4.5; // how fast the player can descend as jumper
 const float PARTICLES_GROUND_IMPACT_SPEED = 6;
 const float SPEED_LIMIT = 12;
 const float PLAYER_STARTING_LIFESPAN = 60; // seconds;
@@ -259,7 +264,7 @@ const float DASHER_FLING_X_DISTANCE = 10;
 const float BOMBER_BLAST_RADIUS = 64;
 const int32_t MOUTH_OPEN_DURATION = 8;
 const float FADE_IN_OUT_TIME = 1 * 30;
-const float TRANSFORM_INDICATE_TIME = 0.8;
+const float TRANSFORM_INDICATE_TIME = 1.2;
 const float GLOBAL_MUSIC_VOLUME = 0.23;
 const char *SAVE_NAME = "save.json";
 
@@ -694,7 +699,7 @@ void draw_character(Character *character) {
     }
 
     // paper mario effect
-    character->shown_facing += (character->facing - character->shown_facing) * 0.6;
+    character->shown_facing += (character->facing - character->shown_facing) * 0.5;
 
     // Draw telegraphing effect
     if (character->wants_to_action && !character->player_controlled) {
@@ -766,7 +771,7 @@ void draw_character(Character *character) {
                 0, (Oct_Vec2){0, 0});
     } else if (character->type == CHARACTER_TYPE_Y_SHOOTER) {
         const float x = character->facing == 1 ? character->physx.x : (character->physx.x + character->physx.bb_width);
-        const float gun_x = x + (character->physx.bb_width / 2) - (19 / 2);
+        const float gun_x = character->facing == 1 ? (x + (character->physx.bb_width / 2) - (19 / 2)) : (x + (character->physx.bb_width / 2) - (19 / 2) + 6);
         oct_DrawSpriteIntColourExt(
                 OCT_INTERPOLATE_ALL, character->id,
                 character_type_sprite(character),
@@ -1485,7 +1490,7 @@ void game_begin() {
     state.player_transform_time = -5;
 
     // Open json with level
-    const char *maps[] = {"data/map1.tmj", "data/map2.tmj", "data/map3.tmj"};
+    const char *maps[] = {"map1.tmj", "map2.tmj", "map3.tmj"};
     uint32_t size;
     uint8_t *data = oct_ReadFile(maps[menu_state.map], gAllocator, &size);
     cJSON *json = cJSON_ParseWithLength((void *)data, size);
@@ -1880,7 +1885,7 @@ void draw_transform_indicator() {
                 55,
                 &(Oct_Circle){
                     .position = {state.player->physx.x + 6, state.player->physx.y + 6},
-                    .radius = percent * 50,
+                    .radius = percent * 60,
                 },
                 &(Oct_Colour){1, 1, 1, oct_Sirp(1, 0, percent)},
                 false, 2);
@@ -2147,10 +2152,7 @@ void handle_top_menu() {
         } else if (menu_state.cursor == 1)  { // options menu
             menu_state.menu = MENU_INDEX_SETTINGS;
             menu_state.cursor = 0;
-        } else if (menu_state.cursor == 2)  { // leaderboards menu
-            menu_state.menu = MENU_INDEX_LEADERBOARDS;
-            menu_state.cursor = 0;
-        } else if (menu_state.cursor == 3)  { // quit
+        } else if (menu_state.cursor == 2)  { // quit
             menu_state.quit = true;
         }
     }
@@ -2261,11 +2263,15 @@ void handle_play() {
                 false);
 
         if (menu_state.cursor == 0 && menu_state.fade_out < 0)  { // play
-            menu_state.fade_out = FADE_IN_OUT_TIME;
-            oct_PlaySound(
-                    oct_GetAsset(gBundle, "sounds/stonelong.wav"),
-                    (Oct_Vec2){1 * gSoundVolume, 1 * gSoundVolume},
-                    false);
+            if (menu_state.highscore >= MAP_UNLOCK_SCORES[menu_state.map]) {
+                menu_state.fade_out = FADE_IN_OUT_TIME;
+                oct_PlaySound(
+                        oct_GetAsset(gBundle, "sounds/stonelong.wav"),
+                        (Oct_Vec2){1 * gSoundVolume, 1 * gSoundVolume},
+                        false);
+            } else {
+                show_confirmation("no lol");
+            }
         } else if (menu_state.cursor == 1)  { // swap body
             menu_state.character = (menu_state.character + 1) % STARTING_BODY_MAX;
         } else if (menu_state.cursor == 2)  { // swap map
@@ -2277,10 +2283,8 @@ void handle_play() {
     }
 
     // draw selected map & character
-    const float character_x = 144;
-    const float character_y = 180;
-    const float map_x = character_x;
-    const float map_y = character_y + 24;
+    const float character_x = 144 + 30;
+    const float character_y = GAME_HEIGHT / 2 + 20;
 
     if (menu_state.character == STARTING_BODY_Y_SHOOTER) {
         const float gun_x = character_x + 6 - (19 / 2);
@@ -2297,11 +2301,35 @@ void handle_play() {
                 oct_GetAsset(gBundle, "sprites/playerjumper.json"), 0,
                 (Oct_Vec2) {character_x, character_y});
     }
-    const char *maps[] = {"Map 1", "Map 2", "Map 3"};
-    oct_DrawText(oct_GetAsset(gBundle, "fnt_monogram"),
-                 (Oct_Vec2){map_x, map_y},
-                 1,
-                 "%s", maps[menu_state.map]);
+
+    const Oct_Texture maps[] = {
+            oct_GetAsset(gBundle, "textures/map1.png"),
+            oct_GetAsset(gBundle, "textures/map2.png"),
+            oct_GetAsset(gBundle, "textures/map3.png"),
+    };
+    oct_DrawText(
+            oct_GetAsset(gBundle, "fnt_monogram"),
+            (Oct_Vec2){150, 110},
+            1,
+            "   Body              Map");
+    oct_DrawTextureExt(
+            maps[menu_state.map],
+            (Oct_Vec2){GAME_WIDTH / 2 + 30, GAME_HEIGHT / 2 + 20},
+            (Oct_Vec2){1, 1},
+            0, (Oct_Vec2){OCT_ORIGIN_MIDDLE, OCT_ORIGIN_MIDDLE});
+
+    if (menu_state.highscore < MAP_UNLOCK_SCORES[menu_state.map]) {
+        oct_DrawTextureExt(
+                oct_GetAsset(gBundle, "textures/locked.png"),
+                (Oct_Vec2){GAME_WIDTH / 2 + 30, GAME_HEIGHT / 2 + 20},
+                (Oct_Vec2){1, 1},
+                0, (Oct_Vec2){OCT_ORIGIN_MIDDLE, OCT_ORIGIN_MIDDLE});
+        oct_DrawText(
+                oct_GetAsset(gBundle, "fnt_monogram"),
+                (Oct_Vec2){240 - 9, 110 + 96},
+                1,
+                "Reach %i points", (int)MAP_UNLOCK_SCORES[menu_state.map]);
+    }
 }
 
 void menu_begin() {
@@ -2309,6 +2337,8 @@ void menu_begin() {
     memset(&menu_state, 0, sizeof(struct MenuState_t));
     menu_state.fade_in = FADE_IN_OUT_TIME;
     Save s = parse_save();
+    gMusicVolume = s.music_volume;
+    gSoundVolume = s.sound_volume;
     menu_state.highscore = s.highscore;
     if (fuck) {
         oct_StopSound(gPlayingMusic);
@@ -2373,7 +2403,7 @@ GameStatus menu_update() {
 
     oct_DrawTextureExt(
             oct_GetAsset(gBundle, "textures/title.png"),
-            (Oct_Vec2){GAME_WIDTH / 2 - 30, 40},
+            (Oct_Vec2){GAME_WIDTH / 2 - 40, 40},
             (Oct_Vec2){1, 1},
             0, (Oct_Vec2){OCT_ORIGIN_MIDDLE, OCT_ORIGIN_MIDDLE});
 
@@ -2492,7 +2522,11 @@ void save_game(Save *save) {
 }
 
 void *startup() {
-    gBundle = oct_LoadAssetBundle("data");
+    if (oct_FileExists("data.bin")) {
+        gBundle = oct_LoadAssetBundle("data.bin");
+    } else {
+        gBundle = oct_LoadAssetBundle("data");
+    }
     gAllocator = oct_CreateHeapAllocator();
     gFrameAllocator = oct_CreateArenaAllocator(4096);
 
@@ -2592,9 +2626,9 @@ int main(int argc, const char **argv) {
             .argv = argv,
 
             // Change these to what you want
-            .windowTitle = "Jam Game",
-            .windowWidth = 1280,
-            .windowHeight = 720,
+            .windowTitle = "Disorderly Conduct",
+            .windowWidth = GAME_WIDTH * 3,
+            .windowHeight = GAME_HEIGHT * 3,
             .debug = false,
     };
     oct_Init(&initInfo);

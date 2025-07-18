@@ -181,22 +181,22 @@ const int ADDITIONAL_SCORE[] = {
 const int32_t GAME_PHASES = 8;
 const int32_t SPAWN_FREQUENCIES[] = { // in frames
         75,
-        70,
         60,
-        60,
-        55,
-        50,
+        45,
         40,
+        38,
+        35,
+        35,
         30,
 };
 const int32_t TIME_BETWEEN_PHASES[] = {
-        30 * 30,
-        30 * 20,
-        30 * 20,
-        30 * 20,
-        30 * 20,
-        30 * 20,
-        30 * 20,
+        30 * 60, // j j y
+        30 * 50, // j j y y x
+        30 * 45, // xy y y x x
+        30 * 45, // xy xy j
+        30 * 40, // j j x x l d
+        30 * 25, // d
+        30 * 40, // l b y
         30 * 20, // doesnt matter, its infinite
 };
 
@@ -247,7 +247,7 @@ const float PARTICLES_GROUND_IMPACT_SPEED = 6;
 const float SPEED_LIMIT = 12;
 const float PLAYER_STARTING_LIFESPAN = 60; // seconds;
 const int32_t START_REQ_KILLS = 2;
-const int32_t REQ_KILLS_ACCUMULATOR = 2; // every x transforms the kills required goes up by 1
+const int32_t REQ_KILLS_ACCUMULATOR = 3; // every x transforms the kills required goes up by 1
 const float ENEMY_FLING_SPEED = 5;
 const int32_t PLAYER_I_FRAMES = 30;
 const float PLAYER_SPEED_FACTOR = 3; // how much fast the player is than the ai in the same types
@@ -1755,43 +1755,49 @@ void handle_enemy_spawns() {
         if (state.game_phase == 0) {
             const int32_t opps[] = {
                     CHARACTER_TYPE_JUMPER,
+                    CHARACTER_TYPE_JUMPER,
                     CHARACTER_TYPE_Y_SHOOTER
             };
-            const int32_t opp = same_chance(2);
+            const int32_t opp = same_chance(3);
             add_ai(opps[opp]);
         } else if (state.game_phase == 1) {
             const int32_t opps[] = {
                     CHARACTER_TYPE_JUMPER,
+                    CHARACTER_TYPE_JUMPER,
+                    CHARACTER_TYPE_Y_SHOOTER,
                     CHARACTER_TYPE_Y_SHOOTER,
                     CHARACTER_TYPE_X_SHOOTER
             };
-            const int32_t opp = same_chance(3);
+            const int32_t opp = same_chance(5);
             add_ai(opps[opp]);
         } else if (state.game_phase == 2) {
             const int32_t opps[] = {
                     CHARACTER_TYPE_XY_SHOOTER,
                     CHARACTER_TYPE_Y_SHOOTER,
+                    CHARACTER_TYPE_Y_SHOOTER,
+                    CHARACTER_TYPE_X_SHOOTER,
                     CHARACTER_TYPE_X_SHOOTER
             };
-            const int32_t opp = same_chance(3);
+            const int32_t opp = same_chance(5);
             add_ai(opps[opp]);
         } else if (state.game_phase == 3) {
             const int32_t opps[] = {
                     CHARACTER_TYPE_XY_SHOOTER,
                     CHARACTER_TYPE_XY_SHOOTER,
                     CHARACTER_TYPE_JUMPER,
-                    CHARACTER_TYPE_BOMBER
             };
-            const int32_t opp = same_chance(4);
+            const int32_t opp = same_chance(3);
             add_ai(opps[opp]);
         } else if (state.game_phase == 4) {
             const int32_t opps[] = {
                     CHARACTER_TYPE_JUMPER,
+                    CHARACTER_TYPE_JUMPER,
+                    CHARACTER_TYPE_X_SHOOTER,
                     CHARACTER_TYPE_X_SHOOTER,
                     CHARACTER_TYPE_LASER,
                     CHARACTER_TYPE_DASHER
             };
-            const int32_t opp = same_chance(4);
+            const int32_t opp = same_chance(6);
             add_ai(opps[opp]);
         } else if (state.game_phase == 5) {
             const int32_t opps[] = {
@@ -1802,8 +1808,8 @@ void handle_enemy_spawns() {
         } else if (state.game_phase == 6) {
             const int32_t opps[] = {
                     CHARACTER_TYPE_LASER,
-                    CHARACTER_TYPE_DASHER,
                     CHARACTER_TYPE_BOMBER,
+                    CHARACTER_TYPE_Y_SHOOTER
             };
             const int32_t opp = same_chance(3);
             add_ai(opps[opp]);

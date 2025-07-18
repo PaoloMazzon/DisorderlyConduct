@@ -180,11 +180,11 @@ const int ADDITIONAL_SCORE[] = {
 
 const int32_t GAME_PHASES = 8;
 const int32_t SPAWN_FREQUENCIES[] = { // in frames
-        80,
         75,
         70,
-        65,
         60,
+        60,
+        55,
         50,
         40,
         30,
@@ -423,6 +423,7 @@ typedef struct GameState_t {
     int32_t game_phase;
 
     bool in_tutorial;
+    Oct_Sound outta_time;
     Oct_SpriteInstance fire;
     float shown_clock_percent;
     float score; // literally just 1 per frame
@@ -917,16 +918,13 @@ InputProfile process_player(Character *character) {
         } else if (character->type == CHARACTER_TYPE_XY_SHOOTER) {
             shoot_xy_bullet(character);
         } else if (character->type == CHARACTER_TYPE_DASHER && kinda_touching_ground) {
-            CollisionEvent left = collision_at(character, null, character->physx.x + character->physx.bb_width, character->physx.y-16, character->physx.bb_width, character->physx.bb_height + 16);
-            CollisionEvent right = collision_at(character, null, character->physx.x - character->physx.bb_width, character->physx.y-16, character->physx.bb_width, character->physx.bb_height + 16);
-            oct_PlaySound(oct_GetAsset(gBundle, "sounds/punch.wav"), (Oct_Vec2){1 * gSoundVolume, 1 * gSoundVolume}, false);
+            oct_PlaySound(oct_GetAsset(gBundle, "sounds/punch.wav"),
+                          (Oct_Vec2) {1 * gSoundVolume, 1 * gSoundVolume}, false);
             character->physx.y_vel -= DASHER_FLING_Y_DISTANCE;
-            if (left.type == COLLISION_EVENT_TYPE_CHARACTER) {
-                left.character->physx.y_vel -= DASHER_FLING_Y_DISTANCE;
-                kill_character(true, left.character, true);
-            } else if (right.type == COLLISION_EVENT_TYPE_CHARACTER) {
-                right.character->physx.y_vel -= DASHER_FLING_Y_DISTANCE;
-                kill_character(true, right.character, true);
+            CollisionEvent bigass = collision_at_no_walls(character, null, character->physx.x - character->physx.bb_width, character->physx.y-20, character->physx.bb_width * 2, character->physx.bb_height + 16);
+            if (bigass.type == COLLISION_EVENT_TYPE_CHARACTER) {
+                bigass.character->physx.y_vel -= DASHER_FLING_Y_DISTANCE;
+                kill_character(true, bigass.character, true);
             }
         } else if (character->type == CHARACTER_TYPE_BOMBER) {
             blow_up(character);
@@ -1260,7 +1258,7 @@ void process_character(Character *character) {
     // Type specific stuff
     if (character->type == CHARACTER_TYPE_JUMPER) {
         // Jump on enemy head should kill them
-        const CollisionEvent y_collision = collision_at(character, null, character->physx.x, character->physx.y + 2, character->physx.bb_width, character->physx.bb_height);
+        const CollisionEvent y_collision = collision_at(character, null, character->physx.x - 5, character->physx.y + 3, character->physx.bb_width + 5, character->physx.bb_height);
         if (y_collision.type == COLLISION_EVENT_TYPE_CHARACTER) {
             kill_character(character->player_controlled, y_collision.character, false);
 
@@ -1488,6 +1486,7 @@ void game_begin() {
     state.req_kills = START_REQ_KILLS;
     oct_InitSpriteInstance(&state.fire, oct_GetAsset(gBundle, "sprites/fire.json"), true);
     state.player_transform_time = -5;
+    state.outta_time = UINT64_MAX;
 
     // Open json with level
     const char *maps[] = {"map1.tmj", "map2.tmj", "map3.tmj"};
@@ -1694,6 +1693,10 @@ void draw_time_alert() {
     const float y = (GAME_HEIGHT / 2);
 
     if (state.lifespan < 5 && !state.player_died) {
+        if (state.outta_time == UINT64_MAX) {
+            state.outta_time = oct_PlaySound(oct_GetAsset(gBundle, "sounds/outtatime.wav"), (Oct_Vec2){gSoundVolume, gSoundVolume}, false);
+        }
+
         const float scale = (sin(oct_Time() * 2) + 1.8) * 0.3;
         const float rotation = cos(oct_Time() * 2.5) * 0.3;
         oct_DrawTextureIntExt(
@@ -1702,6 +1705,9 @@ void draw_time_alert() {
                 (Oct_Vec2){x, y},
                 (Oct_Vec2){scale, scale},
                 rotation, (Oct_Vec2){OCT_ORIGIN_MIDDLE, OCT_ORIGIN_MIDDLE});
+    } else if (state.outta_time != UINT64_MAX) {
+        oct_StopSound(state.outta_time);
+        state.outta_time = UINT64_MAX;
     }
 }
 

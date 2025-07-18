@@ -103,14 +103,14 @@ const float CHARACTER_TYPE_LIFESPANS[] = {
         30, // CHARACTER_TYPE_XY_SHOOTER,
         30, // CHARACTER_TYPE_BOMBER,
         15, // CHARACTER_TYPE_LASER,
-        25, // CHARACTER_TYPE_DASHER,
+        30, // CHARACTER_TYPE_DASHER,
 };
 
 // acceleration values for the ai, player uses this * a constant as well
 const float ACCELERATION_VALUES[] = {
         0, // CHARACTER_TYPE_INVALID,
         0.12, // CHARACTER_TYPE_JUMPER,
-        0.08, // CHARACTER_TYPE_X_SHOOTER,
+        0.10, // CHARACTER_TYPE_X_SHOOTER,
         0.25, // CHARACTER_TYPE_Y_SHOOTER, this guy gotta haul ass
         0.08, // CHARACTER_TYPE_XY_SHOOTER,
         0.20, // CHARACTER_TYPE_BOMBER,
@@ -149,7 +149,7 @@ const float ACTION_CHANCE[] = {
         0.3, // CHARACTER_TYPE_X_SHOOTER,
         0.5, // CHARACTER_TYPE_Y_SHOOTER,
         0.9, // CHARACTER_TYPE_XY_SHOOTER,
-        0.2, // CHARACTER_TYPE_BOMBER,
+        0.4, // CHARACTER_TYPE_BOMBER,
         0.5, // CHARACTER_TYPE_LASER,
         1.0, // CHARACTER_TYPE_DASHER,
 };
@@ -175,7 +175,7 @@ const int ADDITIONAL_SCORE[] = {
         8, // CHARACTER_TYPE_XY_SHOOTER,
         15, // CHARACTER_TYPE_BOMBER,
         10, // CHARACTER_TYPE_LASER,
-        10, // CHARACTER_TYPE_DASHER,
+        20, // CHARACTER_TYPE_DASHER,
 };
 
 const int32_t GAME_PHASES = 8;
@@ -235,13 +235,13 @@ const float MAP_UNLOCK_SCORES[] = {
 #define MAX_PROJECTILES 100
 #define MAX_PARTICLES 1000
 #define MAX_PHYSICS_OBJECTS (MAX_CHARACTERS + MAX_PROJECTILES) // particles noclip
-const float GROUND_FRICTION = 0.06;
-const float AIR_FRICTION = 0.02;
+const float GROUND_FRICTION = 0.07;
+const float AIR_FRICTION = 0.04;
 const float GRAVITY = 0.5;
-const float BOUNCE_PRESERVED_BOUNCE_WALL = 0.50; // how much velocity is preserved when rebounding off walls
-const float BOUNCE_PRESERVED = 0.20; // how much velocity is preserved when rebounding off walls
+const float BOUNCE_PRESERVED_BOUNCE_WALL = 0.45; // how much velocity is preserved when rebounding off walls
+const float BOUNCE_PRESERVED = 0.15; // how much velocity is preserved when rebounding off walls
 const float GAMEPAD_DEADZONE = 0.25;
-const float PLAYER_JUMP_SPEED = 7;
+const float PLAYER_JUMP_SPEED = 8;
 const float JUMPER_DESCEND_SPEED = 4.5; // how fast the player can descend as jumper
 const float PARTICLES_GROUND_IMPACT_SPEED = 6;
 const float SPEED_LIMIT = 12;
@@ -254,14 +254,14 @@ const float PLAYER_SPEED_FACTOR = 3; // how much fast the player is than the ai 
 const float X_SHOOTER_BULLET_LIFETIME = 2;
 const float X_SHOOTER_BULLET_SPEED = 12;
 const float X_SHOOTER_RECOIL = 4;
-const float Y_SHOOTER_BULLET_LIFETIME = 2;
+const float Y_SHOOTER_BULLET_LIFETIME = 1.5;
 const float Y_SHOOTER_BULLET_SPEED = 12;
-const float XY_SHOOTER_BULLET_LIFETIME = 2;
+const float XY_SHOOTER_BULLET_LIFETIME = 1.5;
 const float XY_SHOOTER_BULLET_SPEED = 12;
 const float XY_SHOOTER_RECOIL = 4;
-const float DASHER_FLING_Y_DISTANCE = 10;
+const float DASHER_FLING_Y_DISTANCE = 7;
 const float DASHER_FLING_X_DISTANCE = 10;
-const float BOMBER_BLAST_RADIUS = 64;
+const float BOMBER_BLAST_RADIUS = 80;
 const int32_t MOUTH_OPEN_DURATION = 8;
 const float FADE_IN_OUT_TIME = 1 * 30;
 const float TRANSFORM_INDICATE_TIME = 1.2;
@@ -921,7 +921,7 @@ InputProfile process_player(Character *character) {
             oct_PlaySound(oct_GetAsset(gBundle, "sounds/punch.wav"),
                           (Oct_Vec2) {1 * gSoundVolume, 1 * gSoundVolume}, false);
             character->physx.y_vel -= DASHER_FLING_Y_DISTANCE;
-            CollisionEvent bigass = collision_at_no_walls(character, null, character->physx.x - character->physx.bb_width, character->physx.y-20, character->physx.bb_width * 2, character->physx.bb_height + 16);
+            CollisionEvent bigass = collision_at_no_walls(character, null, character->physx.x - (character->physx.bb_width * 1.5), character->physx.y-20, character->physx.bb_width * 4, character->physx.bb_height + 16);
             if (bigass.type == COLLISION_EVENT_TYPE_CHARACTER) {
                 bigass.character->physx.y_vel -= DASHER_FLING_Y_DISTANCE;
                 kill_character(true, bigass.character, true);

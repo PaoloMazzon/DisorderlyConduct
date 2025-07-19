@@ -162,7 +162,7 @@ const int ACTION_CHANCE_FREQUENCY[] = {
         7, // CHARACTER_TYPE_Y_SHOOTER,
         8, // CHARACTER_TYPE_XY_SHOOTER,
         4, // CHARACTER_TYPE_BOMBER,
-        10, // CHARACTER_TYPE_LASER,
+        7, // CHARACTER_TYPE_LASER,
         1, // CHARACTER_TYPE_DASHER,
 };
 
@@ -197,6 +197,26 @@ const int32_t TIME_BETWEEN_PHASES[] = {
         30 * 40, // j j x x l d
         30 * 25, // d
         30 * 40, // l b y
+        30 * 20, // doesnt matter, its infinite
+};
+const int32_t TIME_BETWEEN_PHASES2[] = {
+        30 * 60, // j y y
+        30 * 50, // j x y
+        30 * 35, // xy y
+        30 * 45, // d l xy
+        30 * 40, // l l x
+        30 * 25, // y b b
+        30 * 40, // b d
+        30 * 20, // doesnt matter, its infinite
+};
+const int32_t TIME_BETWEEN_PHASES3[] = {
+        30 * 60, // xy y j
+        30 * 40, // x xy j
+        30 * 45, // j j l
+        30 * 45, // d x x
+        30 * 40, // l d d
+        30 * 25, // j d l
+        30 * 20, // b
         30 * 20, // doesnt matter, its infinite
 };
 
@@ -270,7 +290,7 @@ const char *SAVE_NAME = "save.json";
 
 ///////////////////////// STRUCTS /////////////////////////
 typedef struct Save_t {
-    float highscore;
+    float highscore[3];
     bool has_done_tutorial;
     bool fullscreen;
     bool pixel_perfect;
@@ -398,7 +418,7 @@ typedef struct MenuState_t {
     const char *drop_text;
     float fade_in;
     float fade_out;
-    float highscore;
+    float highscore[3];
 } MenuState;
 
 MenuState menu_state;
@@ -527,7 +547,11 @@ CollisionEvent collision_at(Character *this_c, Projectile *this_p, float x, floa
                        oct_GetTilemap(state.level_map, grid_x2, grid_y1),
                        oct_GetTilemap(state.level_map, grid_x1, grid_y2),
                        oct_GetTilemap(state.level_map, grid_x2, grid_y2)};
+    // 21
     for (int i = 0; i < 4; i++) {
+        // invisible walls for the player
+        if ((this_c && !this_c->player_controlled && wall[i] == 21)) continue;
+
         if (wall[i]) {
             e.type = wall[i] >= 2 && wall[i] <= 8 ? COLLISION_EVENT_TYPE_BOUNCY_WALL : COLLISION_EVENT_TYPE_WALL;
             e.wallIndex = wall[i];
@@ -1037,9 +1061,9 @@ void shoot_xy_bullet(Character *character) {
 // checks if the user got a highscore and records it if so
 void check_highscore() {
     Save save = parse_save();
-    if (save.highscore < state.score) {
+    if (save.highscore[menu_state.map] < state.score) {
         state.got_highscore = true;
-        save.highscore = state.score;
+        save.highscore[menu_state.map] = state.score;
         save_game(&save);
         // todo - possible global leaderboard
     }
@@ -1744,7 +1768,7 @@ int32_t same_chance(int32_t n){
     return (int32_t)floorf(oct_Random(0, n));
 }
 
-void handle_enemy_spawns() {
+void handle_enemy_spawns1() {
     state.frame_count++;
     if (state.game_phase < GAME_PHASES - 1 && state.frame_count >= TIME_BETWEEN_PHASES[state.game_phase] && !state.player_died) {
         state.game_phase += 1;
@@ -1812,6 +1836,162 @@ void handle_enemy_spawns() {
                     CHARACTER_TYPE_Y_SHOOTER
             };
             const int32_t opp = same_chance(3);
+            add_ai(opps[opp]);
+        } else if (state.game_phase == 7) {
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_JUMPER,
+                    CHARACTER_TYPE_X_SHOOTER,
+                    CHARACTER_TYPE_Y_SHOOTER,
+                    CHARACTER_TYPE_XY_SHOOTER,
+                    CHARACTER_TYPE_LASER,
+                    CHARACTER_TYPE_DASHER,
+                    CHARACTER_TYPE_BOMBER,
+                    CHARACTER_TYPE_BOMBER,
+            };
+            const int32_t opp = same_chance(8);
+            add_ai(opps[opp]);
+        }
+    }
+}
+void handle_enemy_spawns2() {
+    state.frame_count++;
+    if (state.game_phase < GAME_PHASES - 1 && state.frame_count >= TIME_BETWEEN_PHASES2[state.game_phase] && !state.player_died) {
+        state.game_phase += 1;
+        state.frame_count = 0;
+    }
+
+    if (gFrameCounter % SPAWN_FREQUENCIES[state.game_phase] == 0) {
+        if (state.game_phase == 0) {
+            const int32_t opps[] = { // j y y
+                    CHARACTER_TYPE_JUMPER,
+                    CHARACTER_TYPE_Y_SHOOTER,
+                    CHARACTER_TYPE_Y_SHOOTER
+            };
+            const int32_t opp = same_chance(3);
+            add_ai(opps[opp]);
+        } else if (state.game_phase == 1) { // j x y
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_JUMPER,
+                    CHARACTER_TYPE_Y_SHOOTER,
+                    CHARACTER_TYPE_X_SHOOTER
+            };
+            const int32_t opp = same_chance(3);
+            add_ai(opps[opp]);
+        } else if (state.game_phase == 2) { // xy y
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_XY_SHOOTER,
+                    CHARACTER_TYPE_Y_SHOOTER,
+            };
+            const int32_t opp = same_chance(2);
+            add_ai(opps[opp]);
+        } else if (state.game_phase == 3) { // d l xy
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_DASHER,
+                    CHARACTER_TYPE_LASER,
+                    CHARACTER_TYPE_XY_SHOOTER,
+            };
+            const int32_t opp = same_chance(3);
+            add_ai(opps[opp]);
+        } else if (state.game_phase == 4) { // l l x
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_X_SHOOTER,
+                    CHARACTER_TYPE_LASER,
+                    CHARACTER_TYPE_LASER,
+            };
+            const int32_t opp = same_chance(3);
+            add_ai(opps[opp]);
+        } else if (state.game_phase == 5) { // y b b
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_BOMBER,
+                    CHARACTER_TYPE_BOMBER,
+                    CHARACTER_TYPE_Y_SHOOTER,
+            };
+            const int32_t opp = same_chance(3);
+            add_ai(opps[opp]);
+        } else if (state.game_phase == 6) { // b d
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_BOMBER,
+                    CHARACTER_TYPE_DASHER,
+            };
+            const int32_t opp = same_chance(2);
+            add_ai(opps[opp]);
+        } else if (state.game_phase == 7) {
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_JUMPER,
+                    CHARACTER_TYPE_X_SHOOTER,
+                    CHARACTER_TYPE_Y_SHOOTER,
+                    CHARACTER_TYPE_XY_SHOOTER,
+                    CHARACTER_TYPE_LASER,
+                    CHARACTER_TYPE_DASHER,
+                    CHARACTER_TYPE_BOMBER,
+                    CHARACTER_TYPE_BOMBER,
+            };
+            const int32_t opp = same_chance(8);
+            add_ai(opps[opp]);
+        }
+    }
+}
+void handle_enemy_spawns3() {
+    state.frame_count++;
+    if (state.game_phase < GAME_PHASES - 1 && state.frame_count >= TIME_BETWEEN_PHASES3[state.game_phase] && !state.player_died) {
+        state.game_phase += 1;
+        state.frame_count = 0;
+    }
+
+    if (gFrameCounter % SPAWN_FREQUENCIES[state.game_phase] == 0) {
+        if (state.game_phase == 0) {
+            const int32_t opps[] = { // xy y j
+                    CHARACTER_TYPE_JUMPER,
+                    CHARACTER_TYPE_XY_SHOOTER,
+                    CHARACTER_TYPE_Y_SHOOTER
+            };
+            const int32_t opp = same_chance(3);
+            add_ai(opps[opp]);
+        } else if (state.game_phase == 1) { // x xy j
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_JUMPER,
+                    CHARACTER_TYPE_X_SHOOTER,
+                    CHARACTER_TYPE_XY_SHOOTER
+            };
+            const int32_t opp = same_chance(3);
+            add_ai(opps[opp]);
+        } else if (state.game_phase == 2) { // j j l
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_JUMPER,
+                    CHARACTER_TYPE_JUMPER,
+                    CHARACTER_TYPE_LASER,
+            };
+            const int32_t opp = same_chance(3);
+            add_ai(opps[opp]);
+        } else if (state.game_phase == 3) { // d x x
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_X_SHOOTER,
+                    CHARACTER_TYPE_X_SHOOTER,
+                    CHARACTER_TYPE_DASHER,
+            };
+            const int32_t opp = same_chance(3);
+            add_ai(opps[opp]);
+        } else if (state.game_phase == 4) { // l d d
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_LASER,
+                    CHARACTER_TYPE_DASHER,
+                    CHARACTER_TYPE_DASHER,
+            };
+            const int32_t opp = same_chance(3);
+            add_ai(opps[opp]);
+        } else if (state.game_phase == 5) { // j d l
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_DASHER,
+                    CHARACTER_TYPE_JUMPER,
+                    CHARACTER_TYPE_LASER,
+            };
+            const int32_t opp = same_chance(3);
+            add_ai(opps[opp]);
+        } else if (state.game_phase == 6) { // b
+            const int32_t opps[] = {
+                    CHARACTER_TYPE_BOMBER,
+            };
+            const int32_t opp = same_chance(1);
             add_ai(opps[opp]);
         } else if (state.game_phase == 7) {
             const int32_t opps[] = {
@@ -2033,7 +2213,12 @@ GameStatus game_update() {
             }
         }
 
-        handle_enemy_spawns();
+        if (menu_state.map == 0)
+            handle_enemy_spawns1();
+        else if (menu_state.map == 1)
+            handle_enemy_spawns2();
+        else if (menu_state.map == 2)
+            handle_enemy_spawns3();
     }
 
     // particles on top for some fucking reason
@@ -2243,6 +2428,10 @@ void handle_settings() {
     }
 }
 
+bool highscore_reaches_x(float x) {
+    return menu_state.highscore[0] >= x || menu_state.highscore[1] >= x || menu_state.highscore[2] >= x;
+}
+
 void handle_leaderboards() {
     menu_state.menu = MENU_INDEX_TOP;
     menu_state.cursor = 0;
@@ -2275,7 +2464,7 @@ void handle_play() {
                 false);
 
         if (menu_state.cursor == 0 && menu_state.fade_out < 0)  { // play
-            if (menu_state.highscore >= MAP_UNLOCK_SCORES[menu_state.map]) {
+            if (highscore_reaches_x(MAP_UNLOCK_SCORES[menu_state.map])) {
                 menu_state.fade_out = FADE_IN_OUT_TIME;
                 oct_PlaySound(
                         oct_GetAsset(gBundle, "sounds/stonelong.wav"),
@@ -2330,7 +2519,7 @@ void handle_play() {
             (Oct_Vec2){1, 1},
             0, (Oct_Vec2){OCT_ORIGIN_MIDDLE, OCT_ORIGIN_MIDDLE});
 
-    if (menu_state.highscore < MAP_UNLOCK_SCORES[menu_state.map]) {
+    if (!highscore_reaches_x(MAP_UNLOCK_SCORES[menu_state.map])) {
         oct_DrawTextureExt(
                 oct_GetAsset(gBundle, "textures/locked.png"),
                 (Oct_Vec2){GAME_WIDTH / 2 + 30, GAME_HEIGHT / 2 + 20},
@@ -2341,6 +2530,15 @@ void handle_play() {
                 (Oct_Vec2){240 - 9, 110 + 96},
                 1,
                 "Reach %i points", (int)MAP_UNLOCK_SCORES[menu_state.map]);
+    } else {
+        // draw highscore instead 294
+        char buf[100];
+        snprintf(buf, 99, "Highscore: %i", (int)menu_state.highscore[menu_state.map]);
+        float size = strlen(buf) * 7;
+        oct_DrawText(
+                oct_GetAsset(gBundle, "fnt_monogram"),
+                (Oct_Vec2){roundf(294 - (size / 2)), 110 + 96}, 1,
+                "Highscore: %i", (int)menu_state.highscore[menu_state.map]);
     }
 }
 
@@ -2351,7 +2549,9 @@ void menu_begin() {
     Save s = parse_save();
     gMusicVolume = s.music_volume;
     gSoundVolume = s.sound_volume;
-    menu_state.highscore = s.highscore;
+    menu_state.highscore[0] = s.highscore[0];
+    menu_state.highscore[1] = s.highscore[1];
+    menu_state.highscore[2] = s.highscore[2];
     if (fuck) {
         oct_StopSound(gPlayingMusic);
     }
@@ -2443,25 +2643,6 @@ GameStatus menu_update() {
         }
     }
 
-    // draw highscore
-    char buf[100] = {0};
-    snprintf(buf, 99, " Highscore: %i", (int)menu_state.highscore);
-    const float size_x = longest_len(buf, '\n') * 7;
-    const float size_y = 11 + (11 * str_count(buf, '\n'));
-
-    oct_DrawRectangleColour(
-            &(Oct_Colour){0, 0, 0, 1},
-            &(Oct_Rectangle){
-                    .size = {size_x + 2, size_y + 5},
-                    .position = {(GAME_WIDTH / 2) - 1 - (size_x / 2), (GAME_HEIGHT - 24) - 1 - (size_y / 2)}
-            },
-            true, 1);
-    oct_DrawText(
-            oct_GetAsset(gBundle, "fnt_monogram"),
-            (Oct_Vec2){roundf((GAME_WIDTH / 2) - (size_x / 2)), roundf((GAME_HEIGHT - 24) - (size_y / 2))},
-            1,
-            "%s", buf);
-
     if (menu_state.start_game) return GAME_STATUS_PLAY_GAME;
     if (menu_state.quit) return GAME_STATUS_QUIT;
     return GAME_STATUS_MENU;
@@ -2482,9 +2663,17 @@ Save parse_save() {
         cJSON *json = cJSON_ParseWithLength((void *) data, size);
         if (json) {
             // todo parse ip and port in future for remote highscore db
-            float score = cJSON_GetNumberValue(cJSON_GetObjectItem(json, "highscore"));
-            if (!cJSON_IsNumber(cJSON_GetObjectItem(json, "highscore")))
-                score = 0;
+            float score[3] = {
+                    cJSON_GetNumberValue(cJSON_GetObjectItem(json, "highscore1")),
+                    cJSON_GetNumberValue(cJSON_GetObjectItem(json, "highscore2")),
+                    cJSON_GetNumberValue(cJSON_GetObjectItem(json, "highscore3")),
+            };
+            if (!cJSON_IsNumber(cJSON_GetObjectItem(json, "highscore1")))
+                score[0] = 0;
+            if (!cJSON_IsNumber(cJSON_GetObjectItem(json, "highscore2")))
+                score[1] = 0;
+            if (!cJSON_IsNumber(cJSON_GetObjectItem(json, "highscore3")))
+                score[2] = 0;
             float sound_volume = cJSON_GetNumberValue(cJSON_GetObjectItem(json, "sound_volume"));
             if (!cJSON_IsNumber(cJSON_GetObjectItem(json, "sound_volume")))
                 sound_volume = 1;
@@ -2495,7 +2684,7 @@ Save parse_save() {
             float fullscreen = cJSON_IsTrue(cJSON_GetObjectItem(json, "fullscreen"));
             float pixel_perfect = cJSON_IsTrue(cJSON_GetObjectItem(json, "pixel_perfect"));
             Save save = {
-                    .highscore = score,
+                    .highscore = {score[0], score[1], score[2]},
                     .sound_volume = sound_volume,
                     .music_volume = music_volume,
                     .has_done_tutorial = has_done_tutorial,
@@ -2521,7 +2710,9 @@ Save parse_save() {
 
 void save_game(Save *save) {
     cJSON *json = cJSON_CreateObject();
-    cJSON_AddNumberToObject(json, "highscore", save->highscore);
+    cJSON_AddNumberToObject(json, "highscore1", save->highscore[0]);
+    cJSON_AddNumberToObject(json, "highscore2", save->highscore[1]);
+    cJSON_AddNumberToObject(json, "highscore3", save->highscore[2]);
     cJSON_AddBoolToObject(json, "done_tutorial", save->has_done_tutorial);
     cJSON_AddBoolToObject(json, "fullscreen", save->fullscreen);
     cJSON_AddBoolToObject(json, "pixel_perfect", save->pixel_perfect);
